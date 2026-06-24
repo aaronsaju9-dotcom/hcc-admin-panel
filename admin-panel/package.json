@@ -1,0 +1,15 @@
+{
+  "name": "hcc-admin-panel",
+  "version": "1.0.0",
+  "private": true,
+  "description": "JSON-backed admin panel and website preview for Hamriyah Cricket Centre.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "check": "node --check server.js && node --check admin.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

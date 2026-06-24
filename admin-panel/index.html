@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HCC Admin Panel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="admin.css">
+</head>
+<body>
+  <aside class="sidebar" aria-label="Admin navigation">
+    <a class="brand" href="#dashboard" data-section-link="dashboard" aria-label="Dashboard">
+      <img src="logo.png" alt="HCC logo">
+      <span>HCC Admin</span>
+    </a>
+
+    <nav class="side-nav">
+      <button class="nav-item active" type="button" data-section-link="dashboard">
+        <span class="nav-icon">01</span>
+        <span>Dashboard</span>
+      </button>
+      <button class="nav-item" type="button" data-section-link="tournaments">
+        <span class="nav-icon">02</span>
+        <span>Tournaments</span>
+      </button>
+      <button class="nav-item" type="button" data-section-link="images">
+        <span class="nav-icon">03</span>
+        <span>Images</span>
+      </button>
+      <button class="nav-item" type="button" data-section-link="socials">
+        <span class="nav-icon">04</span>
+        <span>Socials</span>
+      </button>
+      <button class="nav-item" type="button" data-section-link="testimonials">
+        <span class="nav-icon">05</span>
+        <span>Testimonials</span>
+      </button>
+    </nav>
+
+    <div class="storage-card">
+      <span class="eyebrow">Storage</span>
+      <strong>File backed</strong>
+      <p>Changes are saved to data/content.json through the local admin server.</p>
+    </div>
+  </aside>
+
+  <main class="app">
+    <header class="topbar">
+      <button class="menu-toggle" type="button" aria-label="Open navigation">Menu</button>
+      <div>
+        <span class="eyebrow">Hamriyah Cricket Centre</span>
+        <h1 id="pageTitle">Admin Dashboard</h1>
+      </div>
+      <div class="top-actions">
+        <a class="btn btn-soft" href="/" target="_blank" rel="noreferrer">View Website</a>
+        <label class="btn btn-soft" for="importFile">Import JSON</label>
+        <input id="importFile" type="file" accept="application/json,.json" hidden>
+        <button class="btn btn-dark" type="button" id="exportBtn">Export JSON</button>
+      </div>
+    </header>
+
+    <section class="panel-section active" id="dashboard" data-title="Admin Dashboard">
+      <div class="hero-panel">
+        <div>
+          <span class="eyebrow">Content control</span>
+          <h2>Edit the HCC website content from one panel.</h2>
+          <p>Manage tournaments, gallery images, social links, and testimonials. Every save writes to the shared website content file.</p>
+        </div>
+        <div class="hero-media">
+          <video src="hero-cricket.mp4" autoplay muted loop playsinline poster="hero-bg-cricket.png"></video>
+        </div>
+      </div>
+
+      <div class="stat-grid">
+        <article class="stat">
+          <span>Tournaments</span>
+          <strong id="statTournaments">0</strong>
+        </article>
+        <article class="stat">
+          <span>Images</span>
+          <strong id="statImages">0</strong>
+        </article>
+        <article class="stat">
+          <span>Social links</span>
+          <strong id="statSocials">0</strong>
+        </article>
+        <article class="stat">
+          <span>Testimonials</span>
+          <strong id="statTestimonials">0</strong>
+        </article>
+      </div>
+
+      <div class="dashboard-grid">
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <span class="eyebrow">Recent edits</span>
+              <h3>Activity</h3>
+            </div>
+            <button class="btn btn-soft" type="button" id="clearActivityBtn">Clear</button>
+          </div>
+          <div class="activity-list" id="activityList"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <span class="eyebrow">Preview</span>
+              <h3>Website Content</h3>
+            </div>
+          </div>
+          <div class="preview-stack" id="quickPreview"></div>
+        </section>
+      </div>
+    </section>
+
+    <section class="panel-section" id="tournaments" data-title="Tournaments">
+      <div class="section-tools">
+        <div>
+          <span class="eyebrow">Fixtures and events</span>
+          <h2>Tournaments</h2>
+        </div>
+        <div class="tool-row">
+          <input class="search-input" id="tournamentSearch" type="search" placeholder="Search tournaments">
+          <button class="btn btn-primary" type="button" id="newTournamentBtn">New tournament</button>
+        </div>
+      </div>
+
+      <div class="workspace-grid">
+        <form class="editor-form" id="tournamentForm">
+          <input type="hidden" id="tournamentId">
+          <div class="form-title-row">
+            <h3 id="tournamentFormTitle">Add tournament</h3>
+            <button class="btn btn-soft" type="button" data-reset-form="tournament">Reset</button>
+          </div>
+          <label>Name<input id="tournamentName" type="text" required placeholder="Ramadan Cup 2026"></label>
+          <div class="two-col">
+            <label>Status
+              <select id="tournamentStatus">
+                <option value="upcoming">Upcoming</option>
+                <option value="ongoing">Ongoing</option>
+                <option value="past">Past</option>
+              </select>
+            </label>
+            <label>Date<input id="tournamentDate" type="date"></label>
+          </div>
+          <div class="two-col">
+            <label>Prize<input id="tournamentPrize" type="text" placeholder="AED 5,000"></label>
+            <label>Registration
+              <select id="tournamentRegistration">
+                <option value="open">Open</option>
+                <option value="closed">Closed</option>
+              </select>
+            </label>
+          </div>
+          <label>Description<textarea id="tournamentDescription" rows="4" placeholder="Tournament details"></textarea></label>
+          <label>Rules <span class="muted">(one per line)</span><textarea id="tournamentRules" rows="4" placeholder="8 overs per side&#10;Leather ball only"></textarea></label>
+          <div class="two-col">
+            <label>Register link<input id="tournamentRegisterLink" type="url" placeholder="https://"></label>
+            <label>CricHeroes link<input id="tournamentCricLink" type="url" placeholder="https://"></label>
+          </div>
+          <label>Poster image
+            <input id="tournamentPoster" type="file" accept="image/*">
+          </label>
+          <div class="image-preview" id="tournamentPosterPreview">No poster selected</div>
+          <div class="form-actions">
+            <button class="btn btn-primary" type="submit">Save tournament</button>
+            <button class="btn btn-danger" type="button" id="deleteTournamentBtn" hidden>Delete</button>
+          </div>
+        </form>
+
+        <div class="list-panel">
+          <div class="list" id="tournamentList"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel-section" id="images" data-title="Images">
+      <div class="section-tools">
+        <div>
+          <span class="eyebrow">Gallery and hero assets</span>
+          <h2>Images</h2>
+        </div>
+        <button class="btn btn-primary" type="button" id="newImageBtn">New image</button>
+      </div>
+
+      <div class="workspace-grid">
+        <form class="editor-form" id="imageForm">
+          <input type="hidden" id="imageId">
+          <div class="form-title-row">
+            <h3 id="imageFormTitle">Add image</h3>
+            <button class="btn btn-soft" type="button" data-reset-form="image">Reset</button>
+          </div>
+          <label>Title<input id="imageTitle" type="text" required placeholder="Floodlight practice"></label>
+          <div class="two-col">
+            <label>Placement
+              <select id="imagePlacement">
+                <option value="gallery">Gallery</option>
+                <option value="hero">Hero</option>
+                <option value="about">About</option>
+                <option value="sponsor">Sponsor</option>
+              </select>
+            </label>
+            <label>Alt text<input id="imageAlt" type="text" placeholder="Players training at HCC"></label>
+          </div>
+          <label>Image file<input id="imageFile" type="file" accept="image/*"></label>
+          <div class="image-preview" id="imagePreview">No image selected</div>
+          <div class="form-actions">
+            <button class="btn btn-primary" type="submit">Save image</button>
+            <button class="btn btn-danger" type="button" id="deleteImageBtn" hidden>Delete</button>
+          </div>
+        </form>
+
+        <div class="list-panel image-grid" id="imageList"></div>
+      </div>
+    </section>
+
+    <section class="panel-section" id="socials" data-title="Socials">
+      <div class="section-tools">
+        <div>
+          <span class="eyebrow">Contact channels</span>
+          <h2>Socials</h2>
+        </div>
+        <button class="btn btn-primary" type="button" id="newSocialBtn">New social</button>
+      </div>
+
+      <div class="workspace-grid">
+        <form class="editor-form" id="socialForm">
+          <input type="hidden" id="socialId">
+          <div class="form-title-row">
+            <h3 id="socialFormTitle">Add social</h3>
+            <button class="btn btn-soft" type="button" data-reset-form="social">Reset</button>
+          </div>
+          <label>Platform
+            <select id="socialPlatform">
+              <option value="WhatsApp">WhatsApp</option>
+              <option value="Instagram">Instagram</option>
+              <option value="Facebook">Facebook</option>
+              <option value="YouTube">YouTube</option>
+              <option value="TikTok">TikTok</option>
+              <option value="Email">Email</option>
+            </select>
+          </label>
+          <label>Label<input id="socialLabel" type="text" required placeholder="HCC Instagram"></label>
+          <label>URL<input id="socialUrl" type="url" required placeholder="https://"></label>
+          <label>
+            <span class="switch-row">
+              <input id="socialVisible" type="checkbox" checked>
+              <span>Visible on website</span>
+            </span>
+          </label>
+          <div class="form-actions">
+            <button class="btn btn-primary" type="submit">Save social</button>
+            <button class="btn btn-danger" type="button" id="deleteSocialBtn" hidden>Delete</button>
+          </div>
+        </form>
+
+        <div class="list-panel">
+          <div class="list" id="socialList"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel-section" id="testimonials" data-title="Testimonials">
+      <div class="section-tools">
+        <div>
+          <span class="eyebrow">Reviews and trust</span>
+          <h2>Testimonials</h2>
+        </div>
+        <button class="btn btn-primary" type="button" id="newTestimonialBtn">New testimonial</button>
+      </div>
+
+      <div class="workspace-grid">
+        <form class="editor-form" id="testimonialForm">
+          <input type="hidden" id="testimonialId">
+          <div class="form-title-row">
+            <h3 id="testimonialFormTitle">Add testimonial</h3>
+            <button class="btn btn-soft" type="button" data-reset-form="testimonial">Reset</button>
+          </div>
+          <label>Name<input id="testimonialName" type="text" required placeholder="Adeel Khan"></label>
+          <label>Role or team<input id="testimonialRole" type="text" placeholder="Captain, Sharjah XI"></label>
+          <label>Message<textarea id="testimonialText" rows="5" required placeholder="Write the testimonial"></textarea></label>
+          <label>Rating
+            <input id="testimonialRating" type="range" min="1" max="5" value="5">
+            <span class="rating-readout" id="ratingReadout">5 stars</span>
+          </label>
+          <label>Avatar image<input id="testimonialAvatar" type="file" accept="image/*"></label>
+          <div class="image-preview avatar-preview" id="testimonialAvatarPreview">No avatar selected</div>
+          <div class="form-actions">
+            <button class="btn btn-primary" type="submit">Save testimonial</button>
+            <button class="btn btn-danger" type="button" id="deleteTestimonialBtn" hidden>Delete</button>
+          </div>
+        </form>
+
+        <div class="list-panel">
+          <div class="list" id="testimonialList"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="admin.js"></script>
+</body>
+</html>
