@@ -24,6 +24,7 @@ const CLOUDINARY_CLOUD_NAME = process.env.CLOUDINARY_CLOUD_NAME || "";
 const CLOUDINARY_API_KEY = process.env.CLOUDINARY_API_KEY || "";
 const CLOUDINARY_API_SECRET = process.env.CLOUDINARY_API_SECRET || "";
 const CLOUDINARY_FOLDER = process.env.CLOUDINARY_FOLDER || "hcc-website";
+const FORMSPREE_ENDPOINT = process.env.FORMSPREE_ENDPOINT || "";
 const TRUST_PROXY = process.env.TRUST_PROXY === "true";
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const rateLimits = new Map();
@@ -324,6 +325,27 @@ async function uploadImageToCloudinary({ file, filename, context }) {
   };
 }
 
+async function forwardFormSubmission(payload) {
+  if (!FORMSPREE_ENDPOINT) {
+    throw new Error("Form endpoint is not configured.");
+  }
+
+  const response = await fetch(FORMSPREE_ENDPOINT, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(result.error || result.message || "Form submission failed.");
+  }
+  return { ok: true };
+}
+
 function timingSafeEqual(a, b) {
   const left = Buffer.from(a);
   const right = Buffer.from(b);
@@ -594,7 +616,8 @@ const server = http.createServer(async (request, response) => {
         ok: true,
         contentStorage: hasSupabaseConfig() ? "supabase" : "local-json",
         imageStorage: hasCloudinaryConfig() ? "cloudinary" : "local-data",
-        auth: hasSupabaseAuthConfig() ? "supabase-auth" : "local-admin"
+        auth: hasSupabaseAuthConfig() ? "supabase-auth" : "local-admin",
+        forms: FORMSPREE_ENDPOINT ? "configured" : "missing"
       });
       return;
     }
@@ -659,6 +682,16 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (request.url === "/api/form-submit" && request.method === "POST") {
+      if (!checkRateLimit(request, "form-submit", 20, 60 * 1000)) {
+        sendJson(response, 429, { error: "Too many form submissions" });
+        return;
+      }
+      const payload = JSON.parse(await readBody(request));
+      sendJson(response, 200, await forwardFormSubmission(payload));
+      return;
+    }
+
     serveFile(request.url, response);
   } catch (error) {
     sendJson(response, 500, { error: error.message || "Server error" });
@@ -671,4 +704,5 @@ server.listen(PORT, () => {
   console.log(`Admin panel available at http://localhost:${PORT}/admin`);
   console.log(`Content storage: ${hasSupabaseConfig() ? "Supabase" : "local JSON fallback"}`);
   console.log(`Image storage: ${hasCloudinaryConfig() ? "Cloudinary" : "local data fallback"}`);
+  console.log(`Forms: ${FORMSPREE_ENDPOINT ? "Formspree proxy" : "not configured"}`);
 });

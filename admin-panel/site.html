@@ -3061,7 +3061,7 @@
     <!-- SLOT BOOKING -->
     <div class="booking-form-panel active" id="booking-panel-slot">
       <form class="booking-form reveal delay-3"
-        action="https://formspree.io/f/xrejodkl"
+        action="/api/form-submit"
         method="POST"
         id="slot-booking-form">
         <input type="hidden" name="form_type" value="Slot Booking">
@@ -3114,7 +3114,7 @@
     <!-- TOURNAMENT REGISTRATION -->
     <div class="booking-form-panel" id="booking-panel-tournament">
       <form class="booking-form reveal delay-3"
-        action="https://formspree.io/f/xrejodkl"
+        action="/api/form-submit"
         method="POST"
         id="tournament-booking-form">
         <input type="hidden" name="form_type" value="Tournament Registration">
@@ -4331,8 +4331,12 @@ async function handleFormSubmit(form, e) {
   btn.textContent = 'Sending...';
   btn.disabled = true;
   try {
-    const data = new FormData(form);
-    const response = await fetch(form.action, { method: 'POST', body: data, headers: { 'Accept': 'application/json' } });
+    const data = Object.fromEntries(new FormData(form).entries());
+    const response = await fetch(form.action, {
+      method: 'POST',
+      body: JSON.stringify(data),
+      headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' }
+    });
     if (response.ok) {
       const tournamentName = form.querySelector('#tournament-name-hidden');
       const confirmMsg = tournamentName && tournamentName.value

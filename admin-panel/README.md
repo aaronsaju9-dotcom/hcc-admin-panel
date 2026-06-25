@@ -69,6 +69,12 @@ The app can use Supabase Auth for real admin accounts.
 
 The existing `ADMIN_USER` / `ADMIN_PASSWORD` login remains as a fallback. Use a strong fallback password.
 
+`ADMIN_EMAILS` means the Supabase Auth email addresses allowed into the admin panel. Example:
+
+```bash
+ADMIN_EMAILS=owner@hcc.com,manager@hcc.com
+```
+
 ## Phase 5: Editorial Controls
 
 The admin panel supports:
@@ -89,6 +95,16 @@ Included server hardening:
 - `GET /robots.txt`
 - `GET /sitemap.xml`
 - Admin routes hidden from robots
+
+## Formspree Endpoint
+
+Booking forms submit to `/api/form-submit`. The server forwards them to Formspree using an environment variable:
+
+```bash
+FORMSPREE_ENDPOINT=https://formspree.io/f/your-form-id
+```
+
+This keeps the Formspree URL out of `site.html` and lets you change forms from Render env settings.
 
 ## Admin Login
 
@@ -114,6 +130,7 @@ CLOUDINARY_CLOUD_NAME=your-cloud-name
 CLOUDINARY_API_KEY=your-api-key
 CLOUDINARY_API_SECRET=your-api-secret
 CLOUDINARY_FOLDER=hcc-website
+FORMSPREE_ENDPOINT=https://formspree.io/f/your-form-id
 NODE_ENV=production
 TRUST_PROXY=true
 ```
@@ -137,6 +154,7 @@ TRUST_PROXY=true
    - `CLOUDINARY_CLOUD_NAME`
    - `CLOUDINARY_API_KEY`
    - `CLOUDINARY_API_SECRET`
+   - `FORMSPREE_ENDPOINT`
 7. Admin edits will use Supabase and image uploads will use Cloudinary when those variables are configured.
 
 ## Hosting On Railway
@@ -145,7 +163,7 @@ TRUST_PROXY=true
 2. Create a Railway project from the repo.
 3. Railway should detect the Node app from `package.json`.
 4. Start command: `npm start`.
-5. Add `ADMIN_USER`, `ADMIN_PASSWORD`, `SESSION_SECRET`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_AUTH_ENABLED`, `ADMIN_EMAILS`, `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` variables.
+5. Add `ADMIN_USER`, `ADMIN_PASSWORD`, `SESSION_SECRET`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_AUTH_ENABLED`, `ADMIN_EMAILS`, `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, and `FORMSPREE_ENDPOINT` variables.
 
 ## Production Notes
 
