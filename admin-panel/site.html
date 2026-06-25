@@ -3408,8 +3408,9 @@ async function fetchTournaments() {
     const content = await fetchContent();
     const rows = content.tournaments;
     _tournamentsCache = rows
-      .filter(row => row && row.name && String(row.name).trim())
-      .map((row, i) => normalizeTournament(row, i));
+      .filter(row => row && row.published !== false && row.name && String(row.name).trim())
+      .map((row, i) => normalizeTournament(row, i))
+      .sort((a, b) => (Number(a.order) || 9999) - (Number(b.order) || 9999));
     return _tournamentsCache;
   })();
   return _fetchPromise;
@@ -3435,6 +3436,8 @@ function normalizeTournament(row, index) {
     image:            get('poster') || get('image'),
     description:      get('description'),
     registrationOpen: isRegOpen,
+    order:            Number(row.order) || index + 1,
+    featured:         row.featured === true,
     rules,
     format:           get('format'),
     overs:            get('overs'),
@@ -3944,7 +3947,8 @@ async function loadGallery() {
     if (!Array.isArray(rows) || rows.length === 0) throw new Error('No gallery data');
 
     const items = rows
-      .filter(r => r && r.src && r.placement !== 'sponsor')
+      .filter(r => r && r.published !== false && r.src && r.placement !== 'sponsor')
+      .sort((a, b) => (Number(a.order) || 9999) - (Number(b.order) || 9999))
       .map(r => ({ image: r.src, title: r.title || r.alt || '' }));
 
     if (items.length === 0) throw new Error('No valid gallery images');
@@ -4008,7 +4012,10 @@ async function loadTestimonials() {
     const rows = content.testimonials;
     if (!Array.isArray(rows) || rows.length === 0) throw new Error('No testimonials');
 
-    _testimonialsData = rows.filter(r => r).map(r => ({
+    _testimonialsData = rows
+    .filter(r => r && r.published !== false)
+    .sort((a, b) => (Number(a.order) || 9999) - (Number(b.order) || 9999))
+    .map(r => ({
       name:  r.name || '',
       text:  r.text || '',
       team:  r.role || '',
@@ -4076,7 +4083,9 @@ function buildTestimonialCard(t) {
 async function loadSocials() {
   try {
     const content = await fetchContent();
-    const socials = content.socials.filter(s => s && s.visible && s.url);
+    const socials = content.socials
+      .filter(s => s && s.published !== false && s.visible && s.url)
+      .sort((a, b) => (Number(a.order) || 9999) - (Number(b.order) || 9999));
     if (!socials.length) return;
 
     const row = document.querySelector('.social-row');

@@ -55,6 +55,41 @@ When Cloudinary variables are present, image uploads go to Cloudinary through th
 
 Important: keep `CLOUDINARY_API_SECRET` on the server only. Do not put it in browser JavaScript.
 
+## Phase 4: Supabase Auth Admin Users
+
+The app can use Supabase Auth for real admin accounts.
+
+1. In Supabase, create admin users under Authentication.
+2. Add allowed admin emails to `ADMIN_EMAILS`.
+3. Set:
+   - `SUPABASE_AUTH_ENABLED=true`
+   - `SUPABASE_ANON_KEY`
+   - `ADMIN_EMAILS=owner@example.com,manager@example.com`
+4. Restart/redeploy.
+
+The existing `ADMIN_USER` / `ADMIN_PASSWORD` login remains as a fallback. Use a strong fallback password.
+
+## Phase 5: Editorial Controls
+
+The admin panel supports:
+
+- Published/hidden status
+- Featured flags
+- Display order
+
+Hidden content stays out of the public website. Display order controls sorting across tournaments, gallery images, socials, and testimonials.
+
+## Phase 6: Production Hardening
+
+Included server hardening:
+
+- Login and API rate limiting
+- Security headers
+- `GET /health`
+- `GET /robots.txt`
+- `GET /sitemap.xml`
+- Admin routes hidden from robots
+
 ## Admin Login
 
 The admin panel and content writes are protected by a login page.
@@ -71,11 +106,16 @@ ADMIN_USER=your-user
 ADMIN_PASSWORD=your-strong-password
 SESSION_SECRET=another-long-random-secret
 SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_ANON_KEY=your-public-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-server-only-service-role-key
+SUPABASE_AUTH_ENABLED=true
+ADMIN_EMAILS=owner@example.com
 CLOUDINARY_CLOUD_NAME=your-cloud-name
 CLOUDINARY_API_KEY=your-api-key
 CLOUDINARY_API_SECRET=your-api-secret
 CLOUDINARY_FOLDER=hcc-website
+NODE_ENV=production
+TRUST_PROXY=true
 ```
 
 ## Hosting On Render
@@ -90,7 +130,10 @@ CLOUDINARY_FOLDER=hcc-website
    - `ADMIN_PASSWORD`
    - `SESSION_SECRET`
    - `SUPABASE_URL`
+   - `SUPABASE_ANON_KEY`
    - `SUPABASE_SERVICE_ROLE_KEY`
+   - `SUPABASE_AUTH_ENABLED`
+   - `ADMIN_EMAILS`
    - `CLOUDINARY_CLOUD_NAME`
    - `CLOUDINARY_API_KEY`
    - `CLOUDINARY_API_SECRET`
@@ -102,13 +145,15 @@ CLOUDINARY_FOLDER=hcc-website
 2. Create a Railway project from the repo.
 3. Railway should detect the Node app from `package.json`.
 4. Start command: `npm start`.
-5. Add `ADMIN_USER`, `ADMIN_PASSWORD`, `SESSION_SECRET`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` variables.
+5. Add `ADMIN_USER`, `ADMIN_PASSWORD`, `SESSION_SECRET`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_AUTH_ENABLED`, `ADMIN_EMAILS`, `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` variables.
 
 ## Production Notes
 
 - Supabase is now supported for Phase 1 database-backed content.
 - Cloudinary is now supported for Phase 2 hosted image storage.
+- Supabase Auth is supported for Phase 4 admin users.
+- Published/order/featured controls are supported for Phase 5 content polish.
 - `data/content.json` remains only as a local fallback.
 - Uploaded images are stored as Cloudinary URLs when Cloudinary env vars are configured. Base64 local fallback is development only.
-- The current admin login is a simple server session. Supabase Auth can replace it in a later phase for multiple admins.
+- The admin session is cookie based. Use `SUPABASE_AUTH_ENABLED=true` and `ADMIN_EMAILS` for real admin accounts.
 - Keep database backups or periodic JSON exports.

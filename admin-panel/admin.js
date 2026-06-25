@@ -117,11 +117,26 @@ async function loadData() {
 
 function mergeDefaults(saved) {
   return {
-    tournaments: Array.isArray(saved.tournaments) ? saved.tournaments : [],
-    images: Array.isArray(saved.images) ? saved.images : [],
-    socials: Array.isArray(saved.socials) ? saved.socials : [],
-    testimonials: Array.isArray(saved.testimonials) ? saved.testimonials : []
+    tournaments: normalizeItems(saved.tournaments),
+    images: normalizeItems(saved.images),
+    socials: normalizeItems(saved.socials),
+    testimonials: normalizeItems(saved.testimonials)
   };
+}
+
+function normalizeItems(items) {
+  return Array.isArray(items)
+    ? items.map((item, index) => ({
+      ...item,
+      published: item.published !== false,
+      featured: item.featured === true,
+      order: Number.isFinite(Number(item.order)) ? Number(item.order) : index + 1
+    }))
+    : [];
+}
+
+function sortByOrder(items) {
+  return [...items].sort((a, b) => (Number(a.order) || 9999) - (Number(b.order) || 9999));
 }
 
 function loadActivity() {
@@ -312,6 +327,9 @@ async function saveTournament(event) {
     rules: $("#tournamentRules").value.split("\n").map((rule) => rule.trim()).filter(Boolean),
     registerLink: $("#tournamentRegisterLink").value.trim(),
     cricLink: $("#tournamentCricLink").value.trim(),
+    order: Number($("#tournamentOrder").value) || data.tournaments.length + 1,
+    published: $("#tournamentPublished").checked,
+    featured: $("#tournamentFeatured").checked,
     poster: cachedUploads.tournamentPoster || existing?.poster || ""
   };
   upsert(data.tournaments, item);
@@ -330,6 +348,9 @@ async function saveImage(event) {
     title: $("#imageTitle").value.trim(),
     placement: $("#imagePlacement").value,
     alt: $("#imageAlt").value.trim(),
+    order: Number($("#imageOrder").value) || data.images.length + 1,
+    published: $("#imagePublished").checked,
+    featured: $("#imageFeatured").checked,
     src: cachedUploads.imageFile || existing?.src || ""
   };
   upsert(data.images, item);
@@ -348,6 +369,8 @@ async function saveSocial(event) {
     platform: $("#socialPlatform").value,
     label: $("#socialLabel").value.trim(),
     url: $("#socialUrl").value.trim(),
+    order: Number($("#socialOrder").value) || data.socials.length + 1,
+    published: $("#socialVisible").checked,
     visible: $("#socialVisible").checked
   };
   upsert(data.socials, item);
@@ -367,6 +390,9 @@ async function saveTestimonial(event) {
     role: $("#testimonialRole").value.trim(),
     text: $("#testimonialText").value.trim(),
     rating: Number($("#testimonialRating").value),
+    order: Number($("#testimonialOrder").value) || data.testimonials.length + 1,
+    published: $("#testimonialPublished").checked,
+    featured: $("#testimonialFeatured").checked,
     avatar: cachedUploads.testimonialAvatar || existing?.avatar || ""
   };
   upsert(data.testimonials, item);
@@ -439,6 +465,9 @@ function editTournament(id) {
   $("#tournamentRules").value = (item.rules || []).join("\n");
   $("#tournamentRegisterLink").value = item.registerLink;
   $("#tournamentCricLink").value = item.cricLink;
+  $("#tournamentOrder").value = item.order || "";
+  $("#tournamentPublished").checked = item.published !== false;
+  $("#tournamentFeatured").checked = item.featured === true;
   cachedUploads.tournamentPoster = "";
   renderImagePreview("#tournamentPosterPreview", item.poster);
   $("#tournamentFormTitle").textContent = "Edit tournament";
@@ -453,6 +482,9 @@ function editImage(id) {
   $("#imageTitle").value = item.title;
   $("#imagePlacement").value = item.placement;
   $("#imageAlt").value = item.alt;
+  $("#imageOrder").value = item.order || "";
+  $("#imagePublished").checked = item.published !== false;
+  $("#imageFeatured").checked = item.featured === true;
   cachedUploads.imageFile = "";
   renderImagePreview("#imagePreview", item.src);
   $("#imageFormTitle").textContent = "Edit image";
@@ -467,6 +499,7 @@ function editSocial(id) {
   $("#socialPlatform").value = item.platform;
   $("#socialLabel").value = item.label;
   $("#socialUrl").value = item.url;
+  $("#socialOrder").value = item.order || "";
   $("#socialVisible").checked = item.visible;
   $("#socialFormTitle").textContent = "Edit social";
   $("#deleteSocialBtn").hidden = false;
@@ -480,6 +513,9 @@ function editTestimonial(id) {
   $("#testimonialName").value = item.name;
   $("#testimonialRole").value = item.role;
   $("#testimonialText").value = item.text;
+  $("#testimonialOrder").value = item.order || "";
+  $("#testimonialPublished").checked = item.published !== false;
+  $("#testimonialFeatured").checked = item.featured === true;
   $("#testimonialRating").value = item.rating;
   $("#ratingReadout").textContent = `${item.rating} stars`;
   cachedUploads.testimonialAvatar = "";
@@ -494,6 +530,8 @@ function resetTournamentForm() {
   $("#tournamentId").value = "";
   cachedUploads.tournamentPoster = "";
   $("#tournamentFormTitle").textContent = "Add tournament";
+  $("#tournamentPublished").checked = true;
+  $("#tournamentFeatured").checked = false;
   $("#deleteTournamentBtn").hidden = true;
   $("#tournamentPosterPreview").textContent = "No poster selected";
 }
@@ -503,6 +541,8 @@ function resetImageForm() {
   $("#imageId").value = "";
   cachedUploads.imageFile = "";
   $("#imageFormTitle").textContent = "Add image";
+  $("#imagePublished").checked = true;
+  $("#imageFeatured").checked = false;
   $("#deleteImageBtn").hidden = true;
   $("#imagePreview").textContent = "No image selected";
 }
@@ -511,6 +551,7 @@ function resetSocialForm() {
   $("#socialForm").reset();
   $("#socialId").value = "";
   $("#socialVisible").checked = true;
+  $("#socialOrder").value = "";
   $("#socialFormTitle").textContent = "Add social";
   $("#deleteSocialBtn").hidden = true;
 }
@@ -521,6 +562,8 @@ function resetTestimonialForm() {
   cachedUploads.testimonialAvatar = "";
   $("#testimonialRating").value = 5;
   $("#ratingReadout").textContent = "5 stars";
+  $("#testimonialPublished").checked = true;
+  $("#testimonialFeatured").checked = false;
   $("#testimonialFormTitle").textContent = "Add testimonial";
   $("#deleteTestimonialBtn").hidden = true;
   $("#testimonialAvatarPreview").textContent = "No avatar selected";
@@ -550,8 +593,8 @@ function renderActivity() {
 }
 
 function renderQuickPreview() {
-  const nextTournament = data.tournaments[0];
-  const visibleSocials = data.socials.filter((social) => social.visible).length;
+  const nextTournament = sortByOrder(data.tournaments).find((item) => item.published !== false);
+  const visibleSocials = data.socials.filter((social) => social.visible && social.published !== false).length;
   $("#quickPreview").innerHTML = `
     <div class="preview-item"><span class="pill red">Next</span><h3>${escapeHtml(nextTournament?.name || "No tournaments")}</h3><p class="item-meta">${escapeHtml(nextTournament?.date || "Add a date")}</p></div>
     <div class="preview-item"><span class="pill">Gallery</span><h3>${data.images.length} managed images</h3></div>
@@ -561,7 +604,7 @@ function renderQuickPreview() {
 
 function renderTournaments() {
   const query = $("#tournamentSearch").value?.toLowerCase() || "";
-  const items = data.tournaments.filter((item) => {
+  const items = sortByOrder(data.tournaments).filter((item) => {
     return [item.name, item.status, item.date, item.prize, item.description].join(" ").toLowerCase().includes(query);
   });
 
@@ -573,6 +616,9 @@ function renderTournaments() {
           <h3 class="item-title">${escapeHtml(item.name)}</h3>
           <div class="item-meta">
             <span class="pill ${item.status === "ongoing" ? "red" : ""}">${escapeHtml(item.status)}</span>
+            <span class="pill ${item.published === false ? "red" : ""}">${item.published === false ? "Hidden" : "Published"}</span>
+            ${item.featured ? `<span class="pill">Featured</span>` : ""}
+            <span>Order ${escapeHtml(item.order || "-")}</span>
             <span>${formatDate(item.date)}</span>
             <span>${escapeHtml(item.prize || "No prize")}</span>
           </div>
@@ -587,13 +633,19 @@ function renderTournaments() {
 }
 
 function renderImages() {
-  $("#imageList").innerHTML = data.images.length
-    ? data.images.map((item) => `
+  const items = sortByOrder(data.images);
+  $("#imageList").innerHTML = items.length
+    ? items.map((item) => `
       <article class="image-card" data-id="${escapeAttr(item.id)}">
         <div class="image-frame">${item.src ? `<img src="${escapeAttr(item.src)}" alt="${escapeAttr(item.alt)}">` : "Image"}</div>
         <div class="image-card-body">
           <h3>${escapeHtml(item.title)}</h3>
-          <div class="item-meta"><span class="pill">${escapeHtml(item.placement)}</span></div>
+          <div class="item-meta">
+            <span class="pill">${escapeHtml(item.placement)}</span>
+            <span class="pill ${item.published === false ? "red" : ""}">${item.published === false ? "Hidden" : "Published"}</span>
+            ${item.featured ? `<span class="pill">Featured</span>` : ""}
+            <span>Order ${escapeHtml(item.order || "-")}</span>
+          </div>
           <button class="icon-btn" type="button" onclick="editImage('${escapeAttr(item.id)}')">Edit</button>
         </div>
       </article>
@@ -602,14 +654,16 @@ function renderImages() {
 }
 
 function renderSocials() {
-  $("#socialList").innerHTML = data.socials.length
-    ? data.socials.map((item) => `
+  const items = sortByOrder(data.socials);
+  $("#socialList").innerHTML = items.length
+    ? items.map((item) => `
       <article class="item-card no-media" data-id="${escapeAttr(item.id)}">
         <div>
           <h3 class="item-title">${escapeHtml(item.label)}</h3>
           <div class="item-meta">
             <span class="pill">${escapeHtml(item.platform)}</span>
             <span class="pill ${item.visible ? "" : "red"}">${item.visible ? "Visible" : "Hidden"}</span>
+            <span>Order ${escapeHtml(item.order || "-")}</span>
           </div>
           <p class="item-meta">${escapeHtml(item.url)}</p>
         </div>
@@ -622,14 +676,18 @@ function renderSocials() {
 }
 
 function renderTestimonials() {
-  $("#testimonialList").innerHTML = data.testimonials.length
-    ? data.testimonials.map((item) => `
+  const items = sortByOrder(data.testimonials);
+  $("#testimonialList").innerHTML = items.length
+    ? items.map((item) => `
       <article class="item-card" data-id="${escapeAttr(item.id)}">
         <div class="item-thumb">${item.avatar ? `<img src="${escapeAttr(item.avatar)}" alt="">` : initials(item.name)}</div>
         <div>
           <h3 class="item-title">${escapeHtml(item.name)}</h3>
           <div class="item-meta">
             <span class="pill">${item.rating}/5 stars</span>
+            <span class="pill ${item.published === false ? "red" : ""}">${item.published === false ? "Hidden" : "Published"}</span>
+            ${item.featured ? `<span class="pill">Featured</span>` : ""}
+            <span>Order ${escapeHtml(item.order || "-")}</span>
             <span>${escapeHtml(item.role || "No role")}</span>
           </div>
           <p class="item-meta">${escapeHtml(item.text)}</p>

@@ -11,13 +11,22 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "change-this-password";
 const SESSION_SECRET = process.env.SESSION_SECRET || ADMIN_PASSWORD;
 const SESSION_COOKIE = "hcc_admin_session";
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const SUPABASE_CONTENT_TABLE = process.env.SUPABASE_CONTENT_TABLE || "hcc_site_content";
 const CONTENT_RECORD_ID = process.env.CONTENT_RECORD_ID || "main";
+const SUPABASE_AUTH_ENABLED = process.env.SUPABASE_AUTH_ENABLED === "true";
+const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
+  .split(",")
+  .map((email) => email.trim().toLowerCase())
+  .filter(Boolean);
 const CLOUDINARY_CLOUD_NAME = process.env.CLOUDINARY_CLOUD_NAME || "";
 const CLOUDINARY_API_KEY = process.env.CLOUDINARY_API_KEY || "";
 const CLOUDINARY_API_SECRET = process.env.CLOUDINARY_API_SECRET || "";
 const CLOUDINARY_FOLDER = process.env.CLOUDINARY_FOLDER || "hcc-website";
+const TRUST_PROXY = process.env.TRUST_PROXY === "true";
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const rateLimits = new Map();
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -124,10 +133,51 @@ function hasCloudinaryConfig() {
 
 function normalizeContent(content) {
   return {
-    tournaments: Array.isArray(content.tournaments) ? content.tournaments : [],
-    images: Array.isArray(content.images) ? content.images : [],
-    socials: Array.isArray(content.socials) ? content.socials : [],
-    testimonials: Array.isArray(content.testimonials) ? content.testimonials : []
+    tournaments: normalizeItems(content.tournaments),
+    images: normalizeItems(content.images),
+    socials: normalizeItems(content.socials),
+    testimonials: normalizeItems(content.testimonials)
+  };
+}
+
+function normalizeItems(items) {
+  return Array.isArray(items)
+    ? items.map((item, index) => ({
+      ...item,
+      published: item.published !== false,
+      featured: item.featured === true,
+      order: Number.isFinite(Number(item.order)) ? Number(item.order) : index + 1
+    }))
+    : [];
+}
+
+function getClientIp(request) {
+  if (TRUST_PROXY && request.headers["x-forwarded-for"]) {
+    return String(request.headers["x-forwarded-for"]).split(",")[0].trim();
+  }
+  return request.socket.remoteAddress || "unknown";
+}
+
+function checkRateLimit(request, bucket, limit, windowMs) {
+  const key = `${bucket}:${getClientIp(request)}`;
+  const now = Date.now();
+  const entry = rateLimits.get(key) || { count: 0, resetAt: now + windowMs };
+  if (now > entry.resetAt) {
+    entry.count = 0;
+    entry.resetAt = now + windowMs;
+  }
+  entry.count += 1;
+  rateLimits.set(key, entry);
+  return entry.count <= limit;
+}
+
+function commonHeaders(extra = {}) {
+  return {
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+    ...(IS_PRODUCTION ? { "Strict-Transport-Security": "max-age=31536000; includeSubDomains" } : {}),
+    ...extra
   };
 }
 
@@ -204,8 +254,10 @@ async function writeContent(content) {
 
 function sendJson(response, status, payload) {
   response.writeHead(status, {
-    "Content-Type": "application/json; charset=utf-8",
-    "Cache-Control": "no-store"
+    ...commonHeaders({
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store"
+    })
   });
   response.end(JSON.stringify(payload, null, 2));
 }
@@ -286,6 +338,10 @@ function signSession(value) {
     .digest("hex");
 }
 
+function makeSessionValue(identity) {
+  return `${identity}.${signSession(identity)}`;
+}
+
 function parseCookies(request) {
   return String(request.headers.cookie || "")
     .split(";")
@@ -322,7 +378,8 @@ function isCookieAuthorized(request) {
   if (separator === -1) return false;
   const user = cookie.slice(0, separator);
   const signature = cookie.slice(separator + 1);
-  return timingSafeEqual(user, ADMIN_USER) && timingSafeEqual(signature, signSession(user));
+  const allowedIdentity = user === ADMIN_USER || (ADMIN_EMAILS.length > 0 && ADMIN_EMAILS.includes(user.toLowerCase()));
+  return allowedIdentity && timingSafeEqual(signature, signSession(user));
 }
 
 function isAuthorized(request) {
@@ -331,8 +388,10 @@ function isAuthorized(request) {
 
 function redirectToLogin(response) {
   response.writeHead(302, {
-    Location: "/login",
-    "Cache-Control": "no-store"
+    ...commonHeaders({
+      Location: "/login",
+      "Cache-Control": "no-store"
+    })
   });
   response.end();
 }
@@ -343,8 +402,10 @@ function sendUnauthorizedJson(response) {
 
 function sendLoginPage(response, errorMessage = "") {
   response.writeHead(200, {
-    "Content-Type": "text/html; charset=utf-8",
-    "Cache-Control": "no-store"
+    ...commonHeaders({
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store"
+    })
   });
   response.end(`<!DOCTYPE html>
 <html lang="en">
@@ -373,7 +434,7 @@ function sendLoginPage(response, errorMessage = "") {
     <h1>Admin Login</h1>
     <p>Sign in to manage tournaments, images, socials, and testimonials.</p>
     <form method="POST" action="/login">
-      <label>Username<input name="username" autocomplete="username" required></label>
+      <label>${SUPABASE_AUTH_ENABLED ? "Email" : "Username"}<input name="username" autocomplete="username" required></label>
       <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
       <button type="submit">Sign in</button>
     </form>
@@ -384,18 +445,48 @@ function sendLoginPage(response, errorMessage = "") {
 </html>`);
 }
 
+function hasSupabaseAuthConfig() {
+  return SUPABASE_AUTH_ENABLED && SUPABASE_URL && SUPABASE_ANON_KEY;
+}
+
+async function verifySupabaseLogin(username, password) {
+  if (!hasSupabaseAuthConfig()) return null;
+  const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+    method: "POST",
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ email: username, password })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.user || !payload.user.email) return null;
+
+  const email = String(payload.user.email).toLowerCase();
+  if (ADMIN_EMAILS.length > 0 && !ADMIN_EMAILS.includes(email)) return null;
+  return email;
+}
+
 async function handleLogin(request, response) {
   const body = await readBody(request);
   const params = new URLSearchParams(body);
   const username = params.get("username") || "";
   const password = params.get("password") || "";
 
-  if (timingSafeEqual(username, ADMIN_USER) && timingSafeEqual(password, ADMIN_PASSWORD)) {
-    const value = `${ADMIN_USER}.${signSession(ADMIN_USER)}`;
+  const supabaseIdentity = await verifySupabaseLogin(username, password);
+  const fallbackIdentity = timingSafeEqual(username, ADMIN_USER) && timingSafeEqual(password, ADMIN_PASSWORD)
+    ? ADMIN_USER
+    : "";
+  const identity = supabaseIdentity || fallbackIdentity;
+
+  if (identity) {
+    const value = makeSessionValue(identity);
     response.writeHead(302, {
-      Location: "/admin",
-      "Set-Cookie": `${SESSION_COOKIE}=${encodeURIComponent(value)}; HttpOnly; Path=/; SameSite=Lax`,
-      "Cache-Control": "no-store"
+      ...commonHeaders({
+        Location: "/admin",
+        "Set-Cookie": `${SESSION_COOKIE}=${encodeURIComponent(value)}; HttpOnly; Path=/; SameSite=Lax${IS_PRODUCTION ? "; Secure" : ""}`,
+        "Cache-Control": "no-store"
+      })
     });
     response.end();
     return;
@@ -406,9 +497,11 @@ async function handleLogin(request, response) {
 
 function handleLogout(response) {
   response.writeHead(302, {
-    Location: "/login",
-    "Set-Cookie": `${SESSION_COOKIE}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0`,
-    "Cache-Control": "no-store"
+    ...commonHeaders({
+      Location: "/login",
+      "Set-Cookie": `${SESSION_COOKIE}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0`,
+      "Cache-Control": "no-store"
+    })
   });
   response.end();
 }
@@ -449,28 +542,72 @@ function serveFile(requestUrl, response) {
   const safePath = path.normalize(path.join(ROOT, pathname));
 
   if (!safePath.startsWith(ROOT)) {
-    response.writeHead(403);
+    response.writeHead(403, commonHeaders({ "Content-Type": "text/plain; charset=utf-8" }));
     response.end("Forbidden");
     return;
   }
 
   fs.readFile(safePath, (error, file) => {
     if (error) {
-      response.writeHead(404);
+      response.writeHead(404, commonHeaders({ "Content-Type": "text/plain; charset=utf-8" }));
       response.end("Not found");
       return;
     }
 
     response.writeHead(200, {
-      "Content-Type": mimeTypes[path.extname(safePath).toLowerCase()] || "application/octet-stream"
+      ...commonHeaders({
+        "Content-Type": mimeTypes[path.extname(safePath).toLowerCase()] || "application/octet-stream"
+      })
     });
     response.end(file);
   });
 }
 
+function sendRobots(request, response) {
+  const origin = getOrigin(request);
+  response.writeHead(200, commonHeaders({ "Content-Type": "text/plain; charset=utf-8" }));
+  response.end(`User-agent: *\nDisallow: /admin\nDisallow: /login\nSitemap: ${origin}/sitemap.xml\n`);
+}
+
+function sendSitemap(request, response) {
+  const origin = getOrigin(request);
+  response.writeHead(200, commonHeaders({ "Content-Type": "application/xml; charset=utf-8" }));
+  response.end(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>${origin}/</loc><priority>1.0</priority></url>\n</urlset>\n`);
+}
+
+function getOrigin(request) {
+  const protocol = TRUST_PROXY && request.headers["x-forwarded-proto"] ? request.headers["x-forwarded-proto"] : "http";
+  return `${protocol}://${request.headers.host || `localhost:${PORT}`}`;
+}
+
 const server = http.createServer(async (request, response) => {
   try {
     const parsed = new URL(request.url, `http://localhost:${PORT}`);
+
+    if (!checkRateLimit(request, "global", 600, 60 * 1000)) {
+      sendJson(response, 429, { error: "Too many requests" });
+      return;
+    }
+
+    if (parsed.pathname === "/health") {
+      sendJson(response, 200, {
+        ok: true,
+        contentStorage: hasSupabaseConfig() ? "supabase" : "local-json",
+        imageStorage: hasCloudinaryConfig() ? "cloudinary" : "local-data",
+        auth: hasSupabaseAuthConfig() ? "supabase-auth" : "local-admin"
+      });
+      return;
+    }
+
+    if (parsed.pathname === "/robots.txt") {
+      sendRobots(request, response);
+      return;
+    }
+
+    if (parsed.pathname === "/sitemap.xml") {
+      sendSitemap(request, response);
+      return;
+    }
 
     if (parsed.pathname === "/login" && request.method === "GET") {
       sendLoginPage(response);
@@ -478,6 +615,10 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (parsed.pathname === "/login" && request.method === "POST") {
+      if (!checkRateLimit(request, "login", 8, 15 * 60 * 1000)) {
+        sendLoginPage(response, "Too many login attempts. Please try again later.");
+        return;
+      }
       await handleLogin(request, response);
       return;
     }
@@ -499,12 +640,20 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.url === "/api/content" && request.method === "POST") {
+      if (!checkRateLimit(request, "content-write", 80, 60 * 1000)) {
+        sendJson(response, 429, { error: "Too many save requests" });
+        return;
+      }
       const payload = JSON.parse(await readBody(request));
       sendJson(response, 200, await writeContent(payload));
       return;
     }
 
     if (request.url === "/api/upload" && request.method === "POST") {
+      if (!checkRateLimit(request, "upload", 30, 60 * 1000)) {
+        sendJson(response, 429, { error: "Too many upload requests" });
+        return;
+      }
       const payload = JSON.parse(await readBody(request));
       sendJson(response, 200, await uploadImageToCloudinary(payload));
       return;

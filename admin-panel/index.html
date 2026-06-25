@@ -147,6 +147,21 @@
             <label>Date<input id="tournamentDate" type="date"></label>
           </div>
           <div class="two-col">
+            <label>Display order<input id="tournamentOrder" type="number" min="0" step="1" placeholder="1"></label>
+            <label>
+              <span class="switch-row">
+                <input id="tournamentPublished" type="checkbox" checked>
+                <span>Published</span>
+              </span>
+            </label>
+          </div>
+          <label>
+            <span class="switch-row">
+              <input id="tournamentFeatured" type="checkbox">
+              <span>Featured tournament</span>
+            </span>
+          </label>
+          <div class="two-col">
             <label>Prize<input id="tournamentPrize" type="text" placeholder="AED 5,000"></label>
             <label>Registration
               <select id="tournamentRegistration">
@@ -205,6 +220,21 @@
             </label>
             <label>Alt text<input id="imageAlt" type="text" placeholder="Players training at HCC"></label>
           </div>
+          <div class="two-col">
+            <label>Display order<input id="imageOrder" type="number" min="0" step="1" placeholder="1"></label>
+            <label>
+              <span class="switch-row">
+                <input id="imagePublished" type="checkbox" checked>
+                <span>Published</span>
+              </span>
+            </label>
+          </div>
+          <label>
+            <span class="switch-row">
+              <input id="imageFeatured" type="checkbox">
+              <span>Featured image</span>
+            </span>
+          </label>
           <label>Image file<input id="imageFile" type="file" accept="image/*"></label>
           <div class="image-preview" id="imagePreview">No image selected</div>
           <div class="form-actions">
@@ -245,6 +275,7 @@
           </label>
           <label>Label<input id="socialLabel" type="text" required placeholder="HCC Instagram"></label>
           <label>URL<input id="socialUrl" type="url" required placeholder="https://"></label>
+          <label>Display order<input id="socialOrder" type="number" min="0" step="1" placeholder="1"></label>
           <label>
             <span class="switch-row">
               <input id="socialVisible" type="checkbox" checked>
@@ -281,6 +312,21 @@
           </div>
           <label>Name<input id="testimonialName" type="text" required placeholder="Adeel Khan"></label>
           <label>Role or team<input id="testimonialRole" type="text" placeholder="Captain, Sharjah XI"></label>
+          <div class="two-col">
+            <label>Display order<input id="testimonialOrder" type="number" min="0" step="1" placeholder="1"></label>
+            <label>
+              <span class="switch-row">
+                <input id="testimonialPublished" type="checkbox" checked>
+                <span>Published</span>
+              </span>
+            </label>
+          </div>
+          <label>
+            <span class="switch-row">
+              <input id="testimonialFeatured" type="checkbox">
+              <span>Featured testimonial</span>
+            </span>
+          </label>
           <label>Message<textarea id="testimonialText" rows="5" required placeholder="Write the testimonial"></textarea></label>
           <label>Rating
             <input id="testimonialRating" type="range" min="1" max="5" value="5">
