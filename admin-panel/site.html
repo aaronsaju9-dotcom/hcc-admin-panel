@@ -2948,7 +2948,7 @@
       <p class="reveal delay-4">From local club tournaments to international-standard practice sessions, HCC delivers an unmatched experience for players of every level.</p>
       <div class="about-stats">
         <div class="stat-box reveal delay-2"><div class="n" id="c1">0</div><div class="l">Pitches Available</div></div>
-        <div class="stat-box reveal delay-3"><div class="n" id="c2">0</div><div class="l">Players Trained</div></div>
+        <div class="stat-box reveal delay-3"><div class="n" id="c2">0</div><div class="l">Total Ground</div></div>
         <div class="stat-box reveal delay-4"><div class="n" id="c3">0</div><div class="l">Matches Hosted</div></div>
         <div class="stat-box reveal delay-5"><div class="n" id="c4">0</div><div class="l">Years of Excellence</div></div>
       </div>
@@ -4537,10 +4537,10 @@ const counterObs = new IntersectionObserver((entries) => {
   entries.forEach(e => {
     if (e.isIntersecting && !countersStarted) {
       countersStarted = true;
-      animateCounter(document.getElementById('c1'), 6);
-      animateCounter(document.getElementById('c2'), 2500, '+');
-      animateCounter(document.getElementById('c3'), 850, '+');
-      animateCounter(document.getElementById('c4'), 9);
+      animateCounter(document.getElementById('c1'), 8);
+      animateCounter(document.getElementById('c2'), 1);
+      animateCounter(document.getElementById('c3'), 1000, '+');
+      animateCounter(document.getElementById('c4'), 8);
     }
   });
 }, { threshold: 0.4 });
