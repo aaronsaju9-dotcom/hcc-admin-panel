@@ -95,6 +95,11 @@ Included server hardening:
 - `GET /robots.txt`
 - `GET /sitemap.xml`
 - Admin routes hidden from robots
+- Admin Settings screen with storage/auth status
+- Supabase password reset and password change flow
+- Content export/import backup tools
+- Form validation for links, dates, and required fields
+- Cloudinary cleanup for images uploaded after this update
 
 ## Formspree Endpoint
 
@@ -134,6 +139,29 @@ FORMSPREE_ENDPOINT=https://formspree.io/f/your-form-id
 NODE_ENV=production
 TRUST_PROXY=true
 ```
+
+### Password Reset And Change
+
+For production, use Supabase Auth:
+
+- Admin login page: `/login`
+- Admin panel: `/admin`
+- Forgot password page: `/reset-request`
+- Password reset landing page: `/reset-password`
+
+Admins listed in `ADMIN_EMAILS` can request a reset email. Logged-in Supabase admins can also change their password from **Settings** inside the admin panel.
+
+The fallback `ADMIN_USER` / `ADMIN_PASSWORD` account is only an emergency login. Its password lives in Render environment variables, so it cannot be changed from the browser.
+
+### Backups
+
+Use **Export JSON** before major content cleanup or client handover. The exported file can be imported again from the admin toolbar.
+
+### Cloudinary Cleanup
+
+New image uploads save Cloudinary `public_id` values alongside the image URL. When those images are replaced or deleted later, the admin panel asks Cloudinary to remove the old asset.
+
+Images uploaded before this feature may not have a saved `public_id`, so they may need manual cleanup in Cloudinary.
 
 ## Hosting On Render
 

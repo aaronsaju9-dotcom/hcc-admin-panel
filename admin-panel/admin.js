@@ -1,6 +1,10 @@
 const ACTIVITY_KEY = "hcc-admin-activity-v1";
 const API_CONTENT_URL = "/api/content";
 const API_UPLOAD_URL = "/api/upload";
+const API_SESSION_URL = "/api/session";
+const API_CLOUDINARY_DELETE_URL = "/api/cloudinary/delete";
+const API_PASSWORD_UPDATE_URL = "/api/password-update";
+const API_PASSWORD_RESET_URL = "/api/password-reset";
 
 const defaultData = {
   tournaments: [
@@ -85,10 +89,11 @@ const defaultData = {
 
 let data = structuredClone(defaultData);
 let activity = loadActivity();
+let sessionInfo = null;
 let cachedUploads = {
-  tournamentPoster: "",
-  imageFile: "",
-  testimonialAvatar: ""
+  tournamentPoster: null,
+  imageFile: null,
+  testimonialAvatar: null
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -99,10 +104,22 @@ document.addEventListener("DOMContentLoaded", async () => {
   bindForms();
   bindToolbar();
   bindFileInputs();
+  await loadSession();
   await loadData();
   renderAll();
   routeFromHash();
 });
+
+async function loadSession() {
+  try {
+    const response = await fetch(API_SESSION_URL, { cache: "no-store" });
+    if (!response.ok) throw new Error("Session unavailable");
+    sessionInfo = await response.json();
+  } catch {
+    sessionInfo = null;
+  }
+  renderSessionStatus();
+}
 
 async function loadData() {
   try {
@@ -210,6 +227,7 @@ function showSection(sectionId) {
 
 function bindToolbar() {
   $("#exportBtn").addEventListener("click", exportJson);
+  $("#settingsExportBtn")?.addEventListener("click", exportJson);
   $("#importFile").addEventListener("change", importJson);
   $("#clearActivityBtn").addEventListener("click", () => {
     activity = [];
@@ -240,6 +258,8 @@ function bindForms() {
   $("#imageForm").addEventListener("submit", saveImage);
   $("#socialForm").addEventListener("submit", saveSocial);
   $("#testimonialForm").addEventListener("submit", saveTestimonial);
+  $("#passwordForm")?.addEventListener("submit", updatePassword);
+  $("#resetEmailForm")?.addEventListener("submit", sendResetEmail);
 
   $("#deleteTournamentBtn").addEventListener("click", deleteTournament);
   $("#deleteImageBtn").addEventListener("click", deleteImage);
@@ -271,16 +291,41 @@ function bindImageInput(inputSelector, cacheKey, previewSelector, context) {
       renderImagePreview(previewSelector, dataUrl);
       setPreviewStatus(previewSelector, "Uploading image...");
       const upload = await uploadImage(dataUrl, file.name, context);
-      cachedUploads[cacheKey] = upload.url;
+      cachedUploads[cacheKey] = upload;
       renderImagePreview(previewSelector, upload.url);
       toast(upload.provider === "cloudinary" ? "Image uploaded to Cloudinary." : "Image ready locally. Configure Cloudinary for production storage.");
     } catch (error) {
-      cachedUploads[cacheKey] = "";
+      cachedUploads[cacheKey] = null;
       event.target.value = "";
       $(previewSelector).textContent = "Upload failed";
       toast(error.message || "Image upload failed.");
     }
   });
+}
+
+async function deleteCloudinaryImage(publicId) {
+  if (!publicId) return;
+  try {
+    const response = await fetch(API_CLOUDINARY_DELETE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ publicId })
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      throw new Error(result.error || "Cloudinary cleanup failed.");
+    }
+  } catch (error) {
+    toast(error.message || "Cloudinary cleanup failed.");
+  }
+}
+
+function getUploadedUrl(cacheKey, existingUrl = "") {
+  return cachedUploads[cacheKey]?.url || existingUrl || "";
+}
+
+function getUploadedPublicId(cacheKey, existingPublicId = "") {
+  return cachedUploads[cacheKey]?.publicId || existingPublicId || "";
 }
 
 function readFileAsDataUrl(file) {
@@ -314,6 +359,11 @@ function setPreviewStatus(selector, text) {
 
 async function saveTournament(event) {
   event.preventDefault();
+  const validation = validateTournamentForm();
+  if (!validation.ok) {
+    toast(validation.message);
+    return;
+  }
   const id = $("#tournamentId").value || createId("tournament");
   const existing = data.tournaments.find((item) => item.id === id);
   const item = {
@@ -330,10 +380,14 @@ async function saveTournament(event) {
     order: Number($("#tournamentOrder").value) || data.tournaments.length + 1,
     published: $("#tournamentPublished").checked,
     featured: $("#tournamentFeatured").checked,
-    poster: cachedUploads.tournamentPoster || existing?.poster || ""
+    poster: getUploadedUrl("tournamentPoster", existing?.poster),
+    posterPublicId: getUploadedPublicId("tournamentPoster", existing?.posterPublicId)
   };
   upsert(data.tournaments, item);
   if (await saveData(`${existing ? "Updated" : "Added"} tournament: ${item.name}`)) {
+    if (cachedUploads.tournamentPoster?.publicId && existing?.posterPublicId && existing.posterPublicId !== cachedUploads.tournamentPoster.publicId) {
+      await deleteCloudinaryImage(existing.posterPublicId);
+    }
     resetTournamentForm();
     toast("Tournament saved to website content.");
   }
@@ -341,6 +395,11 @@ async function saveTournament(event) {
 
 async function saveImage(event) {
   event.preventDefault();
+  const validation = validateImageForm();
+  if (!validation.ok) {
+    toast(validation.message);
+    return;
+  }
   const id = $("#imageId").value || createId("image");
   const existing = data.images.find((item) => item.id === id);
   const item = {
@@ -351,10 +410,14 @@ async function saveImage(event) {
     order: Number($("#imageOrder").value) || data.images.length + 1,
     published: $("#imagePublished").checked,
     featured: $("#imageFeatured").checked,
-    src: cachedUploads.imageFile || existing?.src || ""
+    src: getUploadedUrl("imageFile", existing?.src),
+    publicId: getUploadedPublicId("imageFile", existing?.publicId)
   };
   upsert(data.images, item);
   if (await saveData(`${existing ? "Updated" : "Added"} image: ${item.title}`)) {
+    if (cachedUploads.imageFile?.publicId && existing?.publicId && existing.publicId !== cachedUploads.imageFile.publicId) {
+      await deleteCloudinaryImage(existing.publicId);
+    }
     resetImageForm();
     toast("Image saved to website content.");
   }
@@ -362,6 +425,11 @@ async function saveImage(event) {
 
 async function saveSocial(event) {
   event.preventDefault();
+  const validation = validateSocialForm();
+  if (!validation.ok) {
+    toast(validation.message);
+    return;
+  }
   const id = $("#socialId").value || createId("social");
   const existing = data.socials.find((item) => item.id === id);
   const item = {
@@ -382,6 +450,11 @@ async function saveSocial(event) {
 
 async function saveTestimonial(event) {
   event.preventDefault();
+  const validation = validateTestimonialForm();
+  if (!validation.ok) {
+    toast(validation.message);
+    return;
+  }
   const id = $("#testimonialId").value || createId("testimonial");
   const existing = data.testimonials.find((item) => item.id === id);
   const item = {
@@ -393,10 +466,14 @@ async function saveTestimonial(event) {
     order: Number($("#testimonialOrder").value) || data.testimonials.length + 1,
     published: $("#testimonialPublished").checked,
     featured: $("#testimonialFeatured").checked,
-    avatar: cachedUploads.testimonialAvatar || existing?.avatar || ""
+    avatar: getUploadedUrl("testimonialAvatar", existing?.avatar),
+    avatarPublicId: getUploadedPublicId("testimonialAvatar", existing?.avatarPublicId)
   };
   upsert(data.testimonials, item);
   if (await saveData(`${existing ? "Updated" : "Added"} testimonial: ${item.name}`)) {
+    if (cachedUploads.testimonialAvatar?.publicId && existing?.avatarPublicId && existing.avatarPublicId !== cachedUploads.testimonialAvatar.publicId) {
+      await deleteCloudinaryImage(existing.avatarPublicId);
+    }
     resetTestimonialForm();
     toast("Testimonial saved to website content.");
   }
@@ -408,12 +485,117 @@ function upsert(collection, item) {
   else collection.unshift(item);
 }
 
+function validateTournamentForm() {
+  if (!$("#tournamentName").value.trim()) return invalid("Tournament name is required.");
+  if ($("#tournamentDate").value && Number.isNaN(new Date(`${$("#tournamentDate").value}T00:00:00`).getTime())) {
+    return invalid("Choose a valid tournament date.");
+  }
+  if (!validOptionalUrl($("#tournamentRegisterLink").value)) return invalid("Register link must start with https:// or http://.");
+  if (!validOptionalUrl($("#tournamentCricLink").value)) return invalid("CricHeroes link must start with https:// or http://.");
+  return valid();
+}
+
+function validateImageForm() {
+  if (!$("#imageTitle").value.trim()) return invalid("Image title is required.");
+  const id = $("#imageId").value;
+  const existing = data.images.find((item) => item.id === id);
+  if (!cachedUploads.imageFile?.url && !existing?.src) return invalid("Please upload an image.");
+  return valid();
+}
+
+function validateSocialForm() {
+  if (!$("#socialLabel").value.trim()) return invalid("Social label is required.");
+  if (!isValidUrl($("#socialUrl").value)) return invalid("Social URL must be a valid link.");
+  return valid();
+}
+
+function validateTestimonialForm() {
+  if (!$("#testimonialName").value.trim()) return invalid("Testimonial name is required.");
+  if (!$("#testimonialText").value.trim()) return invalid("Testimonial message is required.");
+  return valid();
+}
+
+function valid() {
+  return { ok: true };
+}
+
+function invalid(message) {
+  return { ok: false, message };
+}
+
+function validOptionalUrl(value) {
+  return !String(value || "").trim() || isValidUrl(value);
+}
+
+function isValidUrl(value) {
+  try {
+    const url = new URL(String(value || "").trim());
+    return url.protocol === "https:" || url.protocol === "http:" || url.protocol === "mailto:";
+  } catch {
+    return false;
+  }
+}
+
+async function updatePassword(event) {
+  event.preventDefault();
+  const currentPassword = $("#currentPassword").value;
+  const newPassword = $("#newPassword").value;
+  const confirmPassword = $("#confirmPassword").value;
+  if (!currentPassword || !newPassword) {
+    toast("Enter current and new password.");
+    return;
+  }
+  if (newPassword.length < 8) {
+    toast("New password must be at least 8 characters.");
+    return;
+  }
+  if (newPassword !== confirmPassword) {
+    toast("New passwords do not match.");
+    return;
+  }
+
+  const response = await fetch(API_PASSWORD_UPDATE_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ currentPassword, newPassword })
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    toast(result.error || "Password update failed.");
+    return;
+  }
+  $("#passwordForm").reset();
+  toast("Password updated.");
+}
+
+async function sendResetEmail(event) {
+  event.preventDefault();
+  const email = $("#resetEmail").value.trim();
+  if (!email) {
+    toast("Enter the admin email.");
+    return;
+  }
+  const response = await fetch(API_PASSWORD_RESET_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email })
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    toast(result.error || "Reset email failed.");
+    return;
+  }
+  $("#resetEmailForm").reset();
+  toast("Reset email sent if the address is allowed.");
+}
+
 async function deleteTournament() {
   const id = $("#tournamentId").value;
   const item = data.tournaments.find((entry) => entry.id === id);
   if (!id || !item || !confirm(`Delete ${item.name}?`)) return;
   data.tournaments = data.tournaments.filter((entry) => entry.id !== id);
   if (await saveData(`Deleted tournament: ${item.name}`)) {
+    await deleteCloudinaryImage(item.posterPublicId);
     resetTournamentForm();
     toast("Tournament deleted.");
   }
@@ -425,6 +607,7 @@ async function deleteImage() {
   if (!id || !item || !confirm(`Delete ${item.title}?`)) return;
   data.images = data.images.filter((entry) => entry.id !== id);
   if (await saveData(`Deleted image: ${item.title}`)) {
+    await deleteCloudinaryImage(item.publicId);
     resetImageForm();
     toast("Image deleted.");
   }
@@ -447,6 +630,7 @@ async function deleteTestimonial() {
   if (!id || !item || !confirm(`Delete ${item.name}?`)) return;
   data.testimonials = data.testimonials.filter((entry) => entry.id !== id);
   if (await saveData(`Deleted testimonial: ${item.name}`)) {
+    await deleteCloudinaryImage(item.avatarPublicId);
     resetTestimonialForm();
     toast("Testimonial deleted.");
   }
@@ -468,7 +652,7 @@ function editTournament(id) {
   $("#tournamentOrder").value = item.order || "";
   $("#tournamentPublished").checked = item.published !== false;
   $("#tournamentFeatured").checked = item.featured === true;
-  cachedUploads.tournamentPoster = "";
+  cachedUploads.tournamentPoster = null;
   renderImagePreview("#tournamentPosterPreview", item.poster);
   $("#tournamentFormTitle").textContent = "Edit tournament";
   $("#deleteTournamentBtn").hidden = false;
@@ -485,7 +669,7 @@ function editImage(id) {
   $("#imageOrder").value = item.order || "";
   $("#imagePublished").checked = item.published !== false;
   $("#imageFeatured").checked = item.featured === true;
-  cachedUploads.imageFile = "";
+  cachedUploads.imageFile = null;
   renderImagePreview("#imagePreview", item.src);
   $("#imageFormTitle").textContent = "Edit image";
   $("#deleteImageBtn").hidden = false;
@@ -518,7 +702,7 @@ function editTestimonial(id) {
   $("#testimonialFeatured").checked = item.featured === true;
   $("#testimonialRating").value = item.rating;
   $("#ratingReadout").textContent = `${item.rating} stars`;
-  cachedUploads.testimonialAvatar = "";
+  cachedUploads.testimonialAvatar = null;
   renderImagePreview("#testimonialAvatarPreview", item.avatar);
   $("#testimonialFormTitle").textContent = "Edit testimonial";
   $("#deleteTestimonialBtn").hidden = false;
@@ -528,7 +712,7 @@ function editTestimonial(id) {
 function resetTournamentForm() {
   $("#tournamentForm").reset();
   $("#tournamentId").value = "";
-  cachedUploads.tournamentPoster = "";
+  cachedUploads.tournamentPoster = null;
   $("#tournamentFormTitle").textContent = "Add tournament";
   $("#tournamentPublished").checked = true;
   $("#tournamentFeatured").checked = false;
@@ -539,7 +723,7 @@ function resetTournamentForm() {
 function resetImageForm() {
   $("#imageForm").reset();
   $("#imageId").value = "";
-  cachedUploads.imageFile = "";
+  cachedUploads.imageFile = null;
   $("#imageFormTitle").textContent = "Add image";
   $("#imagePublished").checked = true;
   $("#imageFeatured").checked = false;
@@ -559,7 +743,7 @@ function resetSocialForm() {
 function resetTestimonialForm() {
   $("#testimonialForm").reset();
   $("#testimonialId").value = "";
-  cachedUploads.testimonialAvatar = "";
+  cachedUploads.testimonialAvatar = null;
   $("#testimonialRating").value = 5;
   $("#ratingReadout").textContent = "5 stars";
   $("#testimonialPublished").checked = true;
@@ -570,6 +754,7 @@ function resetTestimonialForm() {
 }
 
 function renderAll() {
+  renderSessionStatus();
   renderStats();
   renderActivity();
   renderQuickPreview();
@@ -577,6 +762,34 @@ function renderAll() {
   renderImages();
   renderSocials();
   renderTestimonials();
+}
+
+function renderSessionStatus() {
+  if ($("#storageMode")) {
+    const storage = sessionInfo?.contentStorage || "checking";
+    const images = sessionInfo?.imageStorage || "checking";
+    $("#storageMode").textContent = `${storage} + ${images}`;
+  }
+  if ($("#storageNote")) {
+    $("#storageNote").textContent = sessionInfo
+      ? `Auth: ${sessionInfo.auth}. Forms: ${sessionInfo.forms}.`
+      : "Could not read server status yet.";
+  }
+  if ($("#sessionStatus")) {
+    const rows = [
+      ["Signed in as", sessionInfo?.identity || "Unknown"],
+      ["Login type", sessionInfo?.provider || "Unknown"],
+      ["Content storage", sessionInfo?.contentStorage || "Unknown"],
+      ["Image storage", sessionInfo?.imageStorage || "Unknown"],
+      ["Forms", sessionInfo?.forms || "Unknown"]
+    ];
+    $("#sessionStatus").innerHTML = rows.map(([label, value]) => `
+      <div class="status-row">
+        <span>${escapeHtml(label)}</span>
+        <strong>${escapeHtml(value)}</strong>
+      </div>
+    `).join("");
+  }
 }
 
 function renderStats() {

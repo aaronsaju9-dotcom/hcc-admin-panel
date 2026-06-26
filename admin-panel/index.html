@@ -37,12 +37,16 @@
         <span class="nav-icon">05</span>
         <span>Testimonials</span>
       </button>
+      <button class="nav-item" type="button" data-section-link="settings">
+        <span class="nav-icon">06</span>
+        <span>Settings</span>
+      </button>
     </nav>
 
     <div class="storage-card">
       <span class="eyebrow">Storage</span>
-      <strong>File backed</strong>
-      <p>Changes are saved to data/content.json through the local admin server.</p>
+      <strong id="storageMode">Checking...</strong>
+      <p id="storageNote">Loading storage and auth status.</p>
     </div>
   </aside>
 
@@ -58,6 +62,7 @@
         <label class="btn btn-soft" for="importFile">Import JSON</label>
         <input id="importFile" type="file" accept="application/json,.json" hidden>
         <button class="btn btn-dark" type="button" id="exportBtn">Export JSON</button>
+        <a class="btn btn-danger" href="/logout">Logout</a>
       </div>
     </header>
 
@@ -343,6 +348,63 @@
         <div class="list-panel">
           <div class="list" id="testimonialList"></div>
         </div>
+      </div>
+    </section>
+
+    <section class="panel-section" id="settings" data-title="Settings">
+      <div class="section-tools">
+        <div>
+          <span class="eyebrow">Security and handover</span>
+          <h2>Settings</h2>
+        </div>
+        <a class="btn btn-danger" href="/logout">Logout</a>
+      </div>
+
+      <div class="settings-grid">
+        <section class="panel settings-panel">
+          <div class="panel-head">
+            <div>
+              <span class="eyebrow">Account</span>
+              <h3>Admin Login</h3>
+            </div>
+          </div>
+          <div class="status-list" id="sessionStatus"></div>
+        </section>
+
+        <form class="editor-form settings-panel" id="passwordForm">
+          <div class="form-title-row">
+            <h3>Change password</h3>
+          </div>
+          <label>Current password<input id="currentPassword" type="password" autocomplete="current-password"></label>
+          <label>New password<input id="newPassword" type="password" autocomplete="new-password" minlength="8"></label>
+          <label>Confirm new password<input id="confirmPassword" type="password" autocomplete="new-password" minlength="8"></label>
+          <div class="form-actions">
+            <button class="btn btn-primary" type="submit">Update password</button>
+          </div>
+          <p class="helper-text">Password changes work for Supabase Auth admins. For the fallback login, update ADMIN_PASSWORD in Render environment variables.</p>
+        </form>
+
+        <form class="editor-form settings-panel" id="resetEmailForm">
+          <div class="form-title-row">
+            <h3>Send reset email</h3>
+          </div>
+          <label>Admin email<input id="resetEmail" type="email" autocomplete="email" placeholder="owner@example.com"></label>
+          <div class="form-actions">
+            <button class="btn btn-dark" type="submit">Send reset link</button>
+          </div>
+          <p class="helper-text">Use this when the owner forgets their password. Only emails allowed in ADMIN_EMAILS can reset access.</p>
+        </form>
+
+        <section class="panel settings-panel">
+          <div class="panel-head">
+            <div>
+              <span class="eyebrow">Backup</span>
+              <h3>Content Export</h3>
+            </div>
+          </div>
+          <p class="helper-text">Export before large edits, client handover, or cleanup. The file can be imported back from the top toolbar.</p>
+          <button class="btn btn-dark" type="button" id="settingsExportBtn">Export backup</button>
+        </section>
       </div>
     </section>
   </main>
