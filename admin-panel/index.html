@@ -74,7 +74,7 @@
           <p>Manage tournaments, gallery images, social links, and testimonials. Every save writes to the shared website content file.</p>
         </div>
         <div class="hero-media">
-          <video src="hero-cricket.mp4" autoplay muted loop playsinline poster="hero-bg-cricket.png"></video>
+          <video src="hero-cricket.mp4" autoplay muted loop playsinline preload="metadata" poster="hero-bg-cricket.png"></video>
         </div>
       </div>
 
@@ -102,9 +102,9 @@
           <div class="panel-head">
             <div>
               <span class="eyebrow">Recent edits</span>
-              <h3>Activity</h3>
+              <h3>Audit Log</h3>
             </div>
-            <button class="btn btn-soft" type="button" id="clearActivityBtn">Clear</button>
+            <button class="btn btn-soft" type="button" id="clearActivityBtn">Refresh</button>
           </div>
           <div class="activity-list" id="activityList"></div>
         </section>
@@ -404,6 +404,22 @@
           </div>
           <p class="helper-text">Export before large edits, client handover, or cleanup. The file can be imported back from the top toolbar.</p>
           <button class="btn btn-dark" type="button" id="settingsExportBtn">Export backup</button>
+        </section>
+
+        <section class="panel settings-panel handover-panel">
+          <div class="panel-head">
+            <div>
+              <span class="eyebrow">Owner guide</span>
+              <h3>Handover Notes</h3>
+            </div>
+          </div>
+          <div class="handover-list">
+            <p><strong>Before big edits:</strong> export a backup JSON.</p>
+            <p><strong>Tournaments:</strong> keep dates, registration status, poster, and publish state updated.</p>
+            <p><strong>Images:</strong> upload clear landscape photos under 8 MB and write useful alt text.</p>
+            <p><strong>Socials:</strong> only publish links that are active and client-owned.</p>
+            <p><strong>Testimonials:</strong> use real names/roles only with permission.</p>
+          </div>
         </section>
       </div>
     </section>

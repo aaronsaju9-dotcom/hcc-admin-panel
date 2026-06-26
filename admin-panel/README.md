@@ -27,6 +27,7 @@ This phase stores website content in Supabase instead of relying on `data/conten
    - `SUPABASE_URL`
    - `SUPABASE_SERVICE_ROLE_KEY`
    - `SUPABASE_CONTENT_TABLE=hcc_site_content`
+   - `SUPABASE_AUDIT_TABLE=hcc_admin_audit`
    - `CONTENT_RECORD_ID=main`
 5. Restart the Node app.
 
@@ -100,6 +101,8 @@ Included server hardening:
 - Content export/import backup tools
 - Form validation for links, dates, and required fields
 - Cloudinary cleanup for images uploaded after this update
+- Server-backed admin audit log
+- SEO meta tags, structured data, privacy page, and terms page
 
 ## Formspree Endpoint
 
@@ -163,6 +166,17 @@ New image uploads save Cloudinary `public_id` values alongside the image URL. Wh
 
 Images uploaded before this feature may not have a saved `public_id`, so they may need manual cleanup in Cloudinary.
 
+### Audit Log
+
+The dashboard shows recent admin actions from `/api/audit`.
+
+For Supabase persistence, run the latest `supabase-schema.sql`. It creates:
+
+- `public.hcc_site_content`
+- `public.hcc_admin_audit`
+
+If the audit table is missing, the app falls back to `data/audit.json` and content edits still work.
+
 ## Hosting On Render
 
 1. Push this `admin-panel` folder to a GitHub repository.
@@ -177,6 +191,7 @@ Images uploaded before this feature may not have a saved `public_id`, so they ma
    - `SUPABASE_URL`
    - `SUPABASE_ANON_KEY`
    - `SUPABASE_SERVICE_ROLE_KEY`
+   - `SUPABASE_AUDIT_TABLE`
    - `SUPABASE_AUTH_ENABLED`
    - `ADMIN_EMAILS`
    - `CLOUDINARY_CLOUD_NAME`

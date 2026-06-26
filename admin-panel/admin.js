@@ -5,6 +5,7 @@ const API_SESSION_URL = "/api/session";
 const API_CLOUDINARY_DELETE_URL = "/api/cloudinary/delete";
 const API_PASSWORD_UPDATE_URL = "/api/password-update";
 const API_PASSWORD_RESET_URL = "/api/password-reset";
+const API_AUDIT_URL = "/api/audit";
 
 const defaultData = {
   tournaments: [
@@ -89,6 +90,7 @@ const defaultData = {
 
 let data = structuredClone(defaultData);
 let activity = loadActivity();
+let auditEntries = [];
 let sessionInfo = null;
 let cachedUploads = {
   tournamentPoster: null,
@@ -106,6 +108,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   bindFileInputs();
   await loadSession();
   await loadData();
+  await loadAuditEntries();
   renderAll();
   routeFromHash();
 });
@@ -129,6 +132,17 @@ async function loadData() {
   } catch {
     data = structuredClone(defaultData);
     toast("Start the admin server to save shared website content.");
+  }
+}
+
+async function loadAuditEntries() {
+  try {
+    const response = await fetch(API_AUDIT_URL, { cache: "no-store" });
+    if (!response.ok) throw new Error("Audit API unavailable");
+    const result = await response.json();
+    auditEntries = Array.isArray(result.entries) ? result.entries : [];
+  } catch {
+    auditEntries = [];
   }
 }
 
@@ -179,6 +193,7 @@ async function saveData(message) {
 
   data = mergeDefaults(await response.json());
   if (message) addActivity(message);
+  await loadAuditEntries();
   renderAll();
   return true;
 }
@@ -229,11 +244,10 @@ function bindToolbar() {
   $("#exportBtn").addEventListener("click", exportJson);
   $("#settingsExportBtn")?.addEventListener("click", exportJson);
   $("#importFile").addEventListener("change", importJson);
-  $("#clearActivityBtn").addEventListener("click", () => {
-    activity = [];
-    localStorage.removeItem(ACTIVITY_KEY);
+  $("#clearActivityBtn").addEventListener("click", async () => {
+    await loadAuditEntries();
     renderActivity();
-    toast("Activity cleared.");
+    toast("Audit log refreshed.");
   });
 
   $("#tournamentSearch").addEventListener("input", renderTournaments);
@@ -800,9 +814,32 @@ function renderStats() {
 }
 
 function renderActivity() {
-  $("#activityList").innerHTML = activity.length
-    ? activity.map((entry) => `<div class="activity-item"><strong>${escapeHtml(entry.message)}</strong><br>${escapeHtml(entry.time)}</div>`).join("")
-    : `<div class="empty">No activity yet. Save something and it will appear here.</div>`;
+  const rows = auditEntries.length ? auditEntries : activity.map((entry) => ({
+    action: entry.message,
+    created_at: entry.time,
+    actor: "This browser"
+  }));
+  $("#activityList").innerHTML = rows.length
+    ? rows.slice(0, 12).map((entry) => `
+      <div class="activity-item">
+        <strong>${escapeHtml(formatAuditAction(entry.action || entry.message))}</strong>
+        <br>${escapeHtml(entry.actor || "Unknown")} · ${escapeHtml(formatAuditTime(entry.created_at || entry.time))}
+      </div>
+    `).join("")
+    : `<div class="empty">No audit activity yet. Save something and it will appear here.</div>`;
+}
+
+function formatAuditAction(action) {
+  return String(action || "activity")
+    .replaceAll(".", " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatAuditTime(value) {
+  if (!value) return "Just now";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString();
 }
 
 function renderQuickPreview() {

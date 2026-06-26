@@ -383,6 +383,21 @@ video {
   letter-spacing: 0;
 }
 
+.handover-list {
+  display: grid;
+  gap: 12px;
+}
+
+.handover-list p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.handover-list strong {
+  color: var(--green);
+}
+
 .panel {
   padding: 22px;
 }

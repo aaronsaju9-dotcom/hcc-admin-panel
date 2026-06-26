@@ -4,7 +4,40 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hamriyah Cricket Centre — Sharjah</title>
+<meta name="description" content="Hamriyah Cricket Centre is a cricket ground and tournament venue in Sharjah, UAE with floodlit pitches, practice nets, booking enquiries, and tournament registration.">
+<meta name="keywords" content="Hamriyah Cricket Centre, cricket ground Sharjah, cricket pitch UAE, cricket tournament venue, cricket booking Sharjah, Hamriyah cricket ground">
+<meta name="robots" content="index,follow">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Hamriyah Cricket Centre — Sharjah">
+<meta property="og:description" content="Book cricket grounds, practice nets, and tournaments at Hamriyah Cricket Centre in Sharjah, UAE.">
+<meta property="og:image" content="/hero-bg-cricket.png">
+<meta property="og:site_name" content="Hamriyah Cricket Centre">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="canonical" href="/">
+<link rel="icon" href="logo.png" type="image/png">
+<link rel="preload" href="hero-bg-cricket.png" as="image" fetchpriority="high">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Playfair+Display:wght@400;700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SportsActivityLocation",
+  "name": "Hamriyah Cricket Centre",
+  "description": "Cricket ground, practice nets, and tournament venue in Hamriyah, Sharjah, UAE.",
+  "image": "/hero-bg-cricket.png",
+  "telephone": "+971562255337",
+  "email": "info@hamriyahcricketcentre.ae",
+  "address": {
+    "@type": "PostalAddress",
+    "addressLocality": "Hamriyah",
+    "addressRegion": "Sharjah",
+    "addressCountry": "AE"
+  },
+  "openingHours": "Mo-Su 06:00-23:00",
+  "sport": "Cricket"
+}
+</script>
 <style>
   :root {
     --red: #C8101E;
@@ -21,6 +54,28 @@
   *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
   html { scroll-behavior: smooth; overflow-x: hidden; }
   body { font-family: 'DM Sans', sans-serif; background: var(--cream); color: var(--charcoal); overflow-x: hidden; }
+  a:focus-visible,
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: 3px solid var(--hcc-gold, #f5bc42);
+    outline-offset: 3px;
+  }
+  .skip-link {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    z-index: 10000;
+    padding: 10px 14px;
+    color: #fff;
+    background: var(--red);
+    transform: translateY(-160%);
+    transition: transform 0.2s;
+    text-decoration: none;
+    font-weight: 700;
+  }
+  .skip-link:focus { transform: translateY(0); }
 
   /* ─── CURSOR ─── */
   .cursor {
@@ -885,6 +940,7 @@
   .contact-item-text a:hover { color: var(--red-light); }
   .map-placeholder { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden; height: 360px; position: relative; display: flex; align-items: center; justify-content: center; }
   .map-placeholder iframe { width: 100%; height: 100%; border: none; filter: grayscale(0.3) contrast(1.1); }
+  .map-link { display: inline-flex; margin-top: 14px; color: #fff; font-weight: 700; text-decoration: none; border-bottom: 2px solid var(--red-light); }
 
   /* ─── SOCIAL ROW (contact) ─── */
   .social-row { display: flex; gap: 14px; margin-top: 48px; flex-wrap: wrap; }
@@ -925,6 +981,8 @@
   .footer-social-btn:hover { transform: translateY(-3px); border-color: var(--red); background: rgba(200,16,30,0.15); }
   .footer-bottom { border-top: 1px solid rgba(255,255,255,0.06); padding-top: 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
   .footer-bottom p { font-size: 0.78rem; color: rgba(255,255,255,0.3); }
+  .footer-bottom a { color: rgba(255,255,255,0.62); text-decoration: none; }
+  .footer-bottom a:hover { color: #fff; }
 
   /* ─── SCROLL REVEAL ─── */
   .reveal { opacity: 0; transform: translateY(50px); transition: opacity 0.8s cubic-bezier(0.22,1,0.36,1), transform 0.8s cubic-bezier(0.22,1,0.36,1); }
@@ -986,6 +1044,14 @@
     .footer-bottom { flex-direction: column; text-align: center; }
     .social-row { flex-direction: column; }
     .social-btn { justify-content: center; }
+    .hero { min-height: 92vh; padding-top: 110px; }
+    .hero-logo { width: min(42vw, 150px); margin-bottom: 22px; }
+    .hero h1 { font-size: clamp(42px, 17vw, 68px); }
+    .hero-subtitle { font-size: 0.98rem; line-height: 1.55; }
+    .btn-primary,
+    .btn-outline,
+    .form-submit button { width: 100%; max-width: 340px; text-align: center; }
+    .map-placeholder { height: 300px; }
   }
 
   /* ─── HCC CRICKET FIELD REDESIGN OVERRIDES ─── */
@@ -2786,6 +2852,7 @@
 </style>
 </head>
 <body>
+<a class="skip-link" href="#booking">Skip to booking</a>
 
 <div class="cursor" id="cursor"></div>
 <div class="cursor-ring" id="cursor-ring"></div>
@@ -2828,7 +2895,7 @@
 <div id="main-site">
 
 <!-- NAV -->
-<nav id="navbar">
+<nav id="navbar" aria-label="Main navigation">
   <a class="nav-logo" href="#" onclick="showMainSite()">
     <img src="logo.png" onerror="this.style.display='none';" alt="Hamriyah CC Logo">
     <span>Hamriyah<br>Cricket Centre</span>
@@ -2849,13 +2916,13 @@
     <li><a href="#contact" onclick="showMainSite()">Contact</a></li>
     <li><a href="#booking" class="nav-cta" onclick="showMainSite()">Book Now</a></li>
   </ul>
-  <button class="nav-hamburger" id="hamburger" onclick="toggleMobileNav()">
+  <button class="nav-hamburger" id="hamburger" onclick="toggleMobileNav()" aria-label="Open mobile navigation" aria-controls="mobile-nav" aria-expanded="false">
     <span></span><span></span><span></span>
   </button>
 </nav>
 
 <!-- MOBILE NAV -->
-<div class="mobile-nav" id="mobile-nav">
+<div class="mobile-nav" id="mobile-nav" aria-label="Mobile navigation">
   <a href="#about" onclick="closeMobileNav();showMainSite()">About</a>
   <a href="#facilities" onclick="closeMobileNav();showMainSite()">Facilities</a>
   <a href="#pitch" onclick="closeMobileNav();showMainSite()">The Ground</a>
@@ -2918,7 +2985,7 @@
 <!-- ABOUT -->
 <section class="about about-parallax" id="about">
   <div class="about-motion-media" aria-hidden="true">
-    <video autoplay muted loop playsinline preload="metadata" src="hero-cricket.mp4"></video>
+    <video autoplay muted loop playsinline preload="metadata" poster="hero-bg-cricket.png" src="hero-cricket.mp4"></video>
   </div>
   <div class="about-inner">
     <div class="about-visual reveal-left">
@@ -3197,11 +3264,13 @@
     <div class="reveal-right">
       <div class="map-placeholder">
         <iframe
+          title="Hamriyah Cricket Centre location map"
           src="https://www.google.com/maps/embed?pb=!1m14!1m12!1m3!1d3717.055795222978!2d55.51928799897214!3d25.478932738471762!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!5e0!3m2!1sen!2sae!4v1778420727930!5m2!1sen!2sae"
           allowfullscreen="" loading="lazy"
           referrerpolicy="no-referrer-when-downgrade">
         </iframe>
       </div>
+      <a class="map-link" href="https://www.google.com/maps/search/?api=1&query=Hamriyah%20Cricket%20Centre%20Sharjah" target="_blank" rel="noopener">Open in Google Maps</a>
     </div>
   </div>
 </section>
@@ -3223,7 +3292,7 @@
   </div>
   <div class="footer-bottom">
     <p>© 2026 Hamriyah Cricket Centre. All rights reserved. Hamriyah, Sharjah, UAE.</p>
-    <p>info@hamriyahcricketcentre.ae · 056 225 5337</p>
+    <p><a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms</a> · info@hamriyahcricketcentre.ae · 056 225 5337</p>
   </div>
 </footer>
 
@@ -3235,7 +3304,7 @@
 <div class="tournament-page" id="tournament-page" style="position:relative;">
 
   <!-- TOURNAMENT NAVBAR — same design, scrolls with page -->
-  <nav class="navbar tournament-navbar" id="tournament-navbar">
+  <nav class="navbar tournament-navbar" id="tournament-navbar" aria-label="Tournament navigation">
     <a class="nav-logo" href="#" onclick="showMainSite()">
       <img src="logo.png" onerror="this.style.display='none';" alt="Hamriyah CC Logo">
       <span>Hamriyah<br>Cricket Centre</span>
@@ -3256,13 +3325,13 @@
       <li><a href="#" onclick="showMainSite()">Contact</a></li>
       <li><a href="#" class="nav-cta" onclick="showMainSite()">Book Now</a></li>
     </ul>
-    <button class="nav-hamburger" id="tournament-hamburger" onclick="toggleTournamentMobileNav()">
+    <button class="nav-hamburger" id="tournament-hamburger" onclick="toggleTournamentMobileNav()" aria-label="Open tournament navigation" aria-controls="tournament-mobile-nav" aria-expanded="false">
       <span></span><span></span><span></span>
     </button>
   </nav>
 
   <!-- TOURNAMENT MOBILE NAV -->
-  <div class="mobile-nav" id="tournament-mobile-nav">
+  <div class="mobile-nav" id="tournament-mobile-nav" aria-label="Tournament mobile navigation">
     <a href="#" onclick="closeTournamentMobileNav();showMainSite()">About</a>
     <a href="#" onclick="closeTournamentMobileNav();showMainSite()">Facilities</a>
     <a href="#" onclick="closeTournamentMobileNav();showMainSite()">The Ground</a>
@@ -4302,16 +4371,26 @@ function switchBookingTab(tab, btn) {
 }
 
 function toggleMobileNav() {
-  document.getElementById('mobile-nav').classList.toggle('open');
+  const nav = document.getElementById('mobile-nav');
+  const button = document.getElementById('hamburger');
+  nav.classList.toggle('open');
+  if (button) button.setAttribute('aria-expanded', nav.classList.contains('open') ? 'true' : 'false');
 }
 function closeMobileNav() {
   document.getElementById('mobile-nav').classList.remove('open');
+  const button = document.getElementById('hamburger');
+  if (button) button.setAttribute('aria-expanded', 'false');
 }
 function toggleTournamentMobileNav() {
-  document.getElementById('tournament-mobile-nav').classList.toggle('open');
+  const nav = document.getElementById('tournament-mobile-nav');
+  const button = document.getElementById('tournament-hamburger');
+  nav.classList.toggle('open');
+  if (button) button.setAttribute('aria-expanded', nav.classList.contains('open') ? 'true' : 'false');
 }
 function closeTournamentMobileNav() {
   document.getElementById('tournament-mobile-nav').classList.remove('open');
+  const button = document.getElementById('tournament-hamburger');
+  if (button) button.setAttribute('aria-expanded', 'false');
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -4362,34 +4441,40 @@ async function handleFormSubmit(form, e) {
 const cursor = document.getElementById('cursor');
 const ring   = document.getElementById('cursor-ring');
 let mx = 0, my = 0, rx = 0, ry = 0;
+const isFinePointer = window.matchMedia && window.matchMedia('(pointer: fine)').matches;
 
-document.addEventListener('mousemove', e => {
-  mx = e.clientX; my = e.clientY;
-  cursor.style.left = mx + 'px';
-  cursor.style.top  = my + 'px';
-});
+if (isFinePointer) {
+  document.addEventListener('mousemove', e => {
+    mx = e.clientX; my = e.clientY;
+    cursor.style.left = mx + 'px';
+    cursor.style.top  = my + 'px';
+  });
 
-function animRing() {
-  rx += (mx - rx) * 0.12;
-  ry += (my - ry) * 0.12;
-  ring.style.left = rx + 'px';
-  ring.style.top  = ry + 'px';
-  requestAnimationFrame(animRing);
+  function animRing() {
+    rx += (mx - rx) * 0.12;
+    ry += (my - ry) * 0.12;
+    ring.style.left = rx + 'px';
+    ring.style.top  = ry + 'px';
+    requestAnimationFrame(animRing);
+  }
+  animRing();
+
+  document.querySelectorAll('a, button, input, select, textarea').forEach(el => {
+    el.addEventListener('mouseenter', () => {
+      cursor.style.width = '20px'; cursor.style.height = '20px';
+      ring.style.width = '60px'; ring.style.height = '60px';
+      ring.style.opacity = '0.3';
+    });
+    el.addEventListener('mouseleave', () => {
+      cursor.style.width = '12px'; cursor.style.height = '12px';
+      ring.style.width = '40px'; ring.style.height = '40px';
+      ring.style.opacity = '0.6';
+    });
+  });
+} else {
+  cursor.style.display = 'none';
+  ring.style.display = 'none';
 }
-animRing();
-
-document.querySelectorAll('a, button, input, select, textarea').forEach(el => {
-  el.addEventListener('mouseenter', () => {
-    cursor.style.width = '20px'; cursor.style.height = '20px';
-    ring.style.width = '60px'; ring.style.height = '60px';
-    ring.style.opacity = '0.3';
-  });
-  el.addEventListener('mouseleave', () => {
-    cursor.style.width = '12px'; cursor.style.height = '12px';
-    ring.style.width = '40px'; ring.style.height = '40px';
-    ring.style.opacity = '0.6';
-  });
-});
 
 /* ─── NAVBAR SCROLL ─── */
 const navbar = document.getElementById('navbar');
@@ -4402,6 +4487,15 @@ const heroBg   = document.getElementById('hero-bg');
 const heroLogo = document.getElementById('hero-logo');
 const heroScrollStage = document.getElementById('hero-scroll-stage');
 const prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const shouldReduceMedia = prefersReducedMotion || window.innerWidth <= 700;
+
+if (shouldReduceMedia) {
+  document.querySelectorAll('.about-motion-media video').forEach(video => {
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+  });
+}
 
 function clamp01(n) {
   return Math.max(0, Math.min(1, n));

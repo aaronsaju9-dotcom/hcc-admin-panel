@@ -6,6 +6,7 @@ const PORT = Number(process.env.PORT || 8765);
 const ROOT = __dirname;
 const DATA_DIR = path.join(ROOT, "data");
 const CONTENT_FILE = path.join(DATA_DIR, "content.json");
+const AUDIT_FILE = path.join(DATA_DIR, "audit.json");
 const ADMIN_USER = process.env.ADMIN_USER || "admin";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "change-this-password";
 const SESSION_SECRET = process.env.SESSION_SECRET || ADMIN_PASSWORD;
@@ -14,6 +15,7 @@ const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const SUPABASE_CONTENT_TABLE = process.env.SUPABASE_CONTENT_TABLE || "hcc_site_content";
+const SUPABASE_AUDIT_TABLE = process.env.SUPABASE_AUDIT_TABLE || "hcc_admin_audit";
 const CONTENT_RECORD_ID = process.env.CONTENT_RECORD_ID || "main";
 const SUPABASE_AUTH_ENABLED = process.env.SUPABASE_AUTH_ENABLED === "true";
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
@@ -253,6 +255,66 @@ async function readContent() {
 
 async function writeContent(content) {
   return hasSupabaseConfig() ? writeSupabaseContent(content) : writeLocalContent(content);
+}
+
+function readLocalAudit() {
+  ensureContentFile();
+  if (!fs.existsSync(AUDIT_FILE)) fs.writeFileSync(AUDIT_FILE, "[]");
+  try {
+    const rows = JSON.parse(fs.readFileSync(AUDIT_FILE, "utf8"));
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalAudit(rows) {
+  ensureContentFile();
+  const trimmed = Array.isArray(rows) ? rows.slice(0, 200) : [];
+  fs.writeFileSync(AUDIT_FILE, JSON.stringify(trimmed, null, 2));
+  return trimmed;
+}
+
+async function readAuditLog() {
+  if (!hasSupabaseConfig()) return readLocalAudit();
+  try {
+    const rows = await supabaseRequest(`${SUPABASE_AUDIT_TABLE}?select=*&order=created_at.desc&limit=100`);
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return readLocalAudit();
+  }
+}
+
+async function logAudit(request, action, detail = {}) {
+  const session = getSession(request);
+  const entry = {
+    id: `audit-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    created_at: new Date().toISOString(),
+    actor: session?.identity || (isBasicAuthorized(request) ? ADMIN_USER : "system"),
+    action,
+    detail,
+    ip: getClientIp(request)
+  };
+
+  const localRows = [entry, ...readLocalAudit()];
+  writeLocalAudit(localRows);
+
+  if (hasSupabaseConfig()) {
+    try {
+      await supabaseRequest(SUPABASE_AUDIT_TABLE, {
+        method: "POST",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify(entry)
+      });
+    } catch {
+      // Audit logging must never break content edits.
+    }
+  }
+  return entry;
+}
+
+function clearAuditLog() {
+  writeLocalAudit([]);
 }
 
 function sendJson(response, status, payload) {
@@ -603,6 +665,7 @@ function requiresAdminAuth(request) {
   if (pathname === "/api/upload") return true;
   if (pathname === "/api/cloudinary/delete") return true;
   if (pathname === "/api/session") return true;
+  if (pathname === "/api/audit") return true;
   if (pathname === "/api/password-reset") return true;
   if (pathname === "/api/password-update") return true;
   return pathname === "/admin" ||
@@ -840,12 +903,56 @@ function sendRobots(request, response) {
 function sendSitemap(request, response) {
   const origin = getOrigin(request);
   response.writeHead(200, commonHeaders({ "Content-Type": "application/xml; charset=utf-8" }));
-  response.end(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>${origin}/</loc><priority>1.0</priority></url>\n</urlset>\n`);
+  response.end(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>${origin}/</loc><priority>1.0</priority></url>\n  <url><loc>${origin}/privacy</loc><priority>0.3</priority></url>\n  <url><loc>${origin}/terms</loc><priority>0.3</priority></url>\n</urlset>\n`);
 }
 
 function getOrigin(request) {
   const protocol = TRUST_PROXY && request.headers["x-forwarded-proto"] ? request.headers["x-forwarded-proto"] : "http";
   return `${protocol}://${request.headers.host || `localhost:${PORT}`}`;
+}
+
+function sendLegalPage(response, type) {
+  const isPrivacy = type === "privacy";
+  const title = isPrivacy ? "Privacy Policy" : "Terms of Use";
+  const body = isPrivacy
+    ? [
+      "Hamriyah Cricket Centre collects booking and tournament registration details such as names, phone numbers, email addresses, team details, dates, and notes so the team can respond to enquiries and manage reservations.",
+      "Form submissions are processed through the website server and forwarded to the configured form provider. Uploaded website media is stored in Cloudinary, and admin-managed content is stored in Supabase when configured.",
+      "Contact the centre to request correction or deletion of submitted information."
+    ]
+    : [
+      "Website information, tournament details, availability, and prices may change. Confirm final booking details directly with Hamriyah Cricket Centre.",
+      "Users must submit accurate booking and tournament information. The centre may reject or cancel requests that are incomplete, abusive, or unsuitable.",
+      "All venue usage is subject to the centre's booking confirmation, safety rules, and operational requirements."
+    ];
+  response.writeHead(200, commonHeaders({ "Content-Type": "text/html; charset=utf-8" }));
+  response.end(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${title} | Hamriyah Cricket Centre</title>
+  <meta name="robots" content="index,follow">
+  <style>
+    body { margin:0; font-family:Arial,sans-serif; color:#151a16; background:#fffaf0; line-height:1.7; }
+    main { width:min(820px, calc(100% - 32px)); margin:0 auto; padding:72px 0; }
+    a { color:#0b5a38; font-weight:700; }
+    h1 { margin:0 0 18px; font-size:clamp(2rem,6vw,4rem); line-height:1; color:#c8101e; }
+    p { color:#3f4a43; font-size:1rem; }
+    .card { background:#fff; border:1px solid rgba(12,83,51,.16); border-radius:8px; padding:28px; box-shadow:0 18px 54px rgba(6,53,31,.09); }
+  </style>
+</head>
+<body>
+  <main>
+    <p><a href="/">Back to website</a></p>
+    <div class="card">
+      <h1>${title}</h1>
+      ${body.map((paragraph) => `<p>${paragraph}</p>`).join("")}
+      <p>Last updated: June 26, 2026</p>
+    </div>
+  </main>
+</body>
+</html>`);
 }
 
 const server = http.createServer(async (request, response) => {
@@ -875,6 +982,16 @@ const server = http.createServer(async (request, response) => {
 
     if (parsed.pathname === "/sitemap.xml") {
       sendSitemap(request, response);
+      return;
+    }
+
+    if (parsed.pathname === "/privacy") {
+      sendLegalPage(response, "privacy");
+      return;
+    }
+
+    if (parsed.pathname === "/terms") {
+      sendLegalPage(response, "terms");
       return;
     }
 
@@ -946,13 +1063,32 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (request.url === "/api/audit" && request.method === "GET") {
+      sendJson(response, 200, { entries: await readAuditLog() });
+      return;
+    }
+
+    if (request.url === "/api/audit" && request.method === "DELETE") {
+      clearAuditLog();
+      await logAudit(request, "audit.clear");
+      sendJson(response, 200, { ok: true });
+      return;
+    }
+
     if (request.url === "/api/content" && request.method === "POST") {
       if (!checkRateLimit(request, "content-write", 80, 60 * 1000)) {
         sendJson(response, 429, { error: "Too many save requests" });
         return;
       }
       const payload = JSON.parse(await readBody(request));
-      sendJson(response, 200, await writeContent(payload));
+      const saved = await writeContent(payload);
+      await logAudit(request, "content.save", {
+        tournaments: saved.tournaments.length,
+        images: saved.images.length,
+        socials: saved.socials.length,
+        testimonials: saved.testimonials.length
+      });
+      sendJson(response, 200, saved);
       return;
     }
 
@@ -962,7 +1098,13 @@ const server = http.createServer(async (request, response) => {
         return;
       }
       const payload = JSON.parse(await readBody(request));
-      sendJson(response, 200, await uploadImageToCloudinary(payload));
+      const uploaded = await uploadImageToCloudinary(payload);
+      await logAudit(request, "image.upload", {
+        provider: uploaded.provider,
+        context: payload.context || "uploads",
+        publicId: uploaded.publicId || ""
+      });
+      sendJson(response, 200, uploaded);
       return;
     }
 
@@ -972,7 +1114,9 @@ const server = http.createServer(async (request, response) => {
         return;
       }
       const payload = JSON.parse(await readBody(request));
-      sendJson(response, 200, await deleteCloudinaryImage(payload.publicId));
+      const deleted = await deleteCloudinaryImage(payload.publicId);
+      await logAudit(request, "image.delete", { publicId: payload.publicId || "", result: deleted.result || "skipped" });
+      sendJson(response, 200, deleted);
       return;
     }
 
@@ -982,7 +1126,9 @@ const server = http.createServer(async (request, response) => {
         return;
       }
       const payload = JSON.parse(await readBody(request));
-      sendJson(response, 200, await sendSupabasePasswordReset(payload.email, request));
+      const reset = await sendSupabasePasswordReset(payload.email, request);
+      await logAudit(request, "password.reset.request", { email: String(payload.email || "").trim().toLowerCase() });
+      sendJson(response, 200, reset);
       return;
     }
 
@@ -997,7 +1143,9 @@ const server = http.createServer(async (request, response) => {
         return;
       }
       const payload = JSON.parse(await readBody(request));
-      sendJson(response, 200, await updateSupabasePasswordWithLogin(session.identity, payload.currentPassword, payload.newPassword));
+      const updated = await updateSupabasePasswordWithLogin(session.identity, payload.currentPassword, payload.newPassword);
+      await logAudit(request, "password.update", { identity: session.identity });
+      sendJson(response, 200, updated);
       return;
     }
 
