@@ -18,6 +18,7 @@ const SUPABASE_CONTENT_TABLE = process.env.SUPABASE_CONTENT_TABLE || "hcc_site_c
 const SUPABASE_AUDIT_TABLE = process.env.SUPABASE_AUDIT_TABLE || "hcc_admin_audit";
 const CONTENT_RECORD_ID = process.env.CONTENT_RECORD_ID || "main";
 const SUPABASE_AUTH_ENABLED = process.env.SUPABASE_AUTH_ENABLED === "true";
+const ALLOW_LOCAL_ADMIN = process.env.ALLOW_LOCAL_ADMIN === "true";
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
   .split(",")
   .map((email) => email.trim().toLowerCase())
@@ -29,9 +30,21 @@ const CLOUDINARY_FOLDER = process.env.CLOUDINARY_FOLDER || "hcc-website";
 const FORMSPREE_ENDPOINT = process.env.FORMSPREE_ENDPOINT || "";
 const TRUST_PROXY = process.env.TRUST_PROXY === "true";
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const PUBLIC_ORIGIN = String(process.env.PUBLIC_ORIGIN || "").replace(/\/$/, "");
+const SESSION_TTL_MS = Math.max(1, Number(process.env.ADMIN_SESSION_HOURS || 8)) * 60 * 60 * 1000;
 const MAX_JSON_BYTES = 30 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const rateLimits = new Map();
+
+const publicFiles = new Map([
+  ["/site.html", "site.html"],
+  ["/logo.png", "logo.png"],
+  ["/hero-bg-cricket.png", "hero-bg-cricket.png"],
+  ["/hero-cricket.mp4", "hero-cricket.mp4"],
+  ["/index.html", "index.html"],
+  ["/admin.css", "admin.css"],
+  ["/admin.js", "admin.js"]
+]);
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -177,8 +190,27 @@ function checkRateLimit(request, bucket, limit, windowMs) {
 }
 
 function commonHeaders(extra = {}) {
+  const contentSecurityPolicy = [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "object-src 'none'",
+    "frame-ancestors 'none'",
+    "form-action 'self'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com",
+    "img-src 'self' data: blob: https:",
+    "media-src 'self' https:",
+    "connect-src 'self'",
+    "frame-src https://www.google.com https://maps.google.com",
+    ...(IS_PRODUCTION ? ["upgrade-insecure-requests"] : [])
+  ].join("; ");
+
   return {
+    "Content-Security-Policy": contentSecurityPolicy,
+    "X-Frame-Options": "DENY",
     "X-Content-Type-Options": "nosniff",
+    "X-Permitted-Cross-Domain-Policies": "none",
     "Referrer-Policy": "strict-origin-when-cross-origin",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
     ...(IS_PRODUCTION ? { "Strict-Transport-Security": "max-age=31536000; includeSubDomains" } : {}),
@@ -425,6 +457,9 @@ async function deleteCloudinaryImage(publicId) {
 }
 
 async function forwardFormSubmission(payload) {
+  const normalized = normalizeFormSubmission(payload);
+  if (normalized.spam) return { ok: true };
+
   if (!FORMSPREE_ENDPOINT) {
     throw new Error("Form endpoint is not configured.");
   }
@@ -435,7 +470,7 @@ async function forwardFormSubmission(payload) {
       Accept: "application/json",
       "Content-Type": "application/json"
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(normalized.payload)
   });
 
   const result = await response.json().catch(() => ({}));
@@ -443,6 +478,36 @@ async function forwardFormSubmission(payload) {
     throw new Error(result.error || result.message || "Form submission failed.");
   }
   return { ok: true };
+}
+
+function normalizeFormSubmission(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new Error("Invalid form submission.");
+  }
+  if (String(payload.website || "").trim()) return { spam: true, payload: {} };
+
+  const allowedFields = new Set([
+    "form_type", "fullname", "phone", "email", "booking_type", "booking_date",
+    "time_slot", "notes", "tournament_name", "team_name", "captain_name",
+    "squad_size", "tournament_selection"
+  ]);
+  const cleanPayload = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (!allowedFields.has(key)) continue;
+    const limit = key === "notes" ? 2000 : 250;
+    cleanPayload[key] = String(value ?? "").trim().slice(0, limit);
+  }
+
+  if (!cleanPayload.form_type || !cleanPayload.phone) {
+    throw new Error("Required form details are missing.");
+  }
+  if (cleanPayload.form_type === "Slot Booking" && (!cleanPayload.fullname || !cleanPayload.booking_date)) {
+    throw new Error("Required booking details are missing.");
+  }
+  if (cleanPayload.form_type === "Tournament Registration" && (!cleanPayload.team_name || !cleanPayload.captain_name)) {
+    throw new Error("Required tournament details are missing.");
+  }
+  return { spam: false, payload: cleanPayload };
 }
 
 function timingSafeEqual(a, b) {
@@ -459,13 +524,18 @@ function signSession(value) {
     .digest("hex");
 }
 
-function makeSessionValue(identity) {
-  return `${identity}.${signSession(identity)}`;
+function makeSessionObjectValue(session) {
+  const issuedAt = Date.now();
+  const payload = Buffer.from(JSON.stringify({
+    ...session,
+    issuedAt,
+    expiresAt: issuedAt + SESSION_TTL_MS
+  })).toString("base64url");
+  return `${payload}.${signSession(payload)}`;
 }
 
-function makeSessionObjectValue(session) {
-  const payload = Buffer.from(JSON.stringify(session)).toString("base64url");
-  return `${payload}.${signSession(payload)}`;
+function localAdminEnabled() {
+  return !SUPABASE_AUTH_ENABLED || ALLOW_LOCAL_ADMIN;
 }
 
 function parseCookies(request) {
@@ -482,6 +552,7 @@ function parseCookies(request) {
 }
 
 function isBasicAuthorized(request) {
+  if (!localAdminEnabled()) return false;
   const header = request.headers.authorization || "";
   if (!header.startsWith("Basic ")) return false;
 
@@ -512,12 +583,12 @@ function getSession(request) {
     try {
       const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
       const identity = String(session.identity || "");
+      if (!Number.isFinite(session.expiresAt) || Date.now() >= session.expiresAt) return null;
       const allowedIdentity = identity === ADMIN_USER || (ADMIN_EMAILS.length > 0 && ADMIN_EMAILS.includes(identity.toLowerCase()));
+      if (identity === ADMIN_USER && !localAdminEnabled()) return null;
       return allowedIdentity ? session : null;
     } catch {
-      const identity = payload;
-      const allowedIdentity = identity === ADMIN_USER || (ADMIN_EMAILS.length > 0 && ADMIN_EMAILS.includes(identity.toLowerCase()));
-      return allowedIdentity ? { identity, provider: identity === ADMIN_USER ? "local" : "supabase" } : null;
+      return null;
     }
   }
   return null;
@@ -623,7 +694,7 @@ async function handleLogin(request, response) {
   const password = params.get("password") || "";
 
   const supabaseIdentity = await verifySupabaseLogin(username, password);
-  const fallbackIdentity = timingSafeEqual(username, ADMIN_USER) && timingSafeEqual(password, ADMIN_PASSWORD)
+  const fallbackIdentity = localAdminEnabled() && timingSafeEqual(username, ADMIN_USER) && timingSafeEqual(password, ADMIN_PASSWORD)
     ? { identity: ADMIN_USER, provider: "local" }
     : null;
   const session = supabaseIdentity
@@ -635,7 +706,7 @@ async function handleLogin(request, response) {
     response.writeHead(302, {
       ...commonHeaders({
         Location: "/admin",
-        "Set-Cookie": `${SESSION_COOKIE}=${encodeURIComponent(value)}; HttpOnly; Path=/; SameSite=Lax${IS_PRODUCTION ? "; Secure" : ""}`,
+        "Set-Cookie": `${SESSION_COOKIE}=${encodeURIComponent(value)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}${IS_PRODUCTION ? "; Secure" : ""}`,
         "Cache-Control": "no-store"
       })
     });
@@ -672,6 +743,19 @@ function requiresAdminAuth(request) {
     pathname === "/index.html" ||
     pathname === "/admin.css" ||
     pathname === "/admin.js";
+}
+
+function isSameOriginWrite(request) {
+  if (!new Set(["POST", "PUT", "PATCH", "DELETE"]).has(request.method)) return true;
+  if (String(request.headers["sec-fetch-site"] || "").toLowerCase() === "cross-site") return false;
+
+  const suppliedOrigin = request.headers.origin || request.headers.referer;
+  if (!suppliedOrigin) return true;
+  try {
+    return new URL(suppliedOrigin).origin === getRequestOrigin(request);
+  } catch {
+    return false;
+  }
 }
 
 function readBody(request) {
@@ -870,13 +954,13 @@ function serveFile(requestUrl, response) {
   if (routePath === "/") routePath = "/site.html";
   if (routePath === "/admin") routePath = "/index.html";
   const pathname = decodeURIComponent(routePath);
-  const safePath = path.normalize(path.join(ROOT, pathname));
-
-  if (!safePath.startsWith(ROOT)) {
-    response.writeHead(403, commonHeaders({ "Content-Type": "text/plain; charset=utf-8" }));
-    response.end("Forbidden");
+  const fileName = publicFiles.get(pathname);
+  if (!fileName) {
+    response.writeHead(404, commonHeaders({ "Content-Type": "text/plain; charset=utf-8" }));
+    response.end("Not found");
     return;
   }
+  const safePath = path.join(ROOT, fileName);
 
   fs.readFile(safePath, (error, file) => {
     if (error) {
@@ -907,8 +991,19 @@ function sendSitemap(request, response) {
 }
 
 function getOrigin(request) {
+  if (PUBLIC_ORIGIN) return PUBLIC_ORIGIN;
+  return getRequestOrigin(request);
+}
+
+function getRequestOrigin(request) {
   const protocol = TRUST_PROXY && request.headers["x-forwarded-proto"] ? request.headers["x-forwarded-proto"] : "http";
-  return `${protocol}://${request.headers.host || `localhost:${PORT}`}`;
+  return `${String(protocol).split(",")[0].trim()}://${request.headers.host || `localhost:${PORT}`}`;
+}
+
+function authMode() {
+  if (hasSupabaseAuthConfig()) return "supabase-auth";
+  if (localAdminEnabled()) return "local-admin";
+  return "misconfigured";
 }
 
 function sendLegalPage(response, type) {
@@ -964,12 +1059,18 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (!isSameOriginWrite(request)) {
+      sendJson(response, 403, { error: "Cross-site request blocked" });
+      return;
+    }
+
     if (parsed.pathname === "/health") {
       sendJson(response, 200, {
         ok: true,
         contentStorage: hasSupabaseConfig() ? "supabase" : "local-json",
         imageStorage: hasCloudinaryConfig() ? "cloudinary" : "local-data",
-        auth: hasSupabaseAuthConfig() ? "supabase-auth" : "local-admin",
+        auth: authMode(),
+        localAdmin: localAdminEnabled() ? "enabled" : "disabled",
         forms: FORMSPREE_ENDPOINT ? "configured" : "missing"
       });
       return;
@@ -1057,7 +1158,7 @@ const server = http.createServer(async (request, response) => {
         provider: session?.provider || "basic",
         contentStorage: hasSupabaseConfig() ? "supabase" : "local-json",
         imageStorage: hasCloudinaryConfig() ? "cloudinary" : "local-data",
-        auth: hasSupabaseAuthConfig() ? "supabase-auth" : "local-admin",
+        auth: authMode(),
         forms: FORMSPREE_ENDPOINT ? "configured" : "missing"
       });
       return;
@@ -1182,4 +1283,5 @@ server.listen(PORT, () => {
   console.log(`Content storage: ${hasSupabaseConfig() ? "Supabase" : "local JSON fallback"}`);
   console.log(`Image storage: ${hasCloudinaryConfig() ? "Cloudinary" : "local data fallback"}`);
   console.log(`Forms: ${FORMSPREE_ENDPOINT ? "Formspree proxy" : "not configured"}`);
+  console.log(`Local admin fallback: ${localAdminEnabled() ? "enabled" : "disabled"}`);
 });

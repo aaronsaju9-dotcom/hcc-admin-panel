@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "check": "node --check server.js && node --check admin.js"
+    "check": "node --check server.js && node --check admin.js && node --check security-check.js",
+    "test:security": "node security-check.js"
   },
   "engines": {
     "node": ">=18"

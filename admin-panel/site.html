@@ -547,6 +547,13 @@
     padding: 56px; border: 1px solid var(--border);
     text-align: left;
   }
+  .form-honeypot {
+    position: absolute;
+    left: -10000px;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+  }
   .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
   .form-group { display: flex; flex-direction: column; gap: 8px; }
   .form-group.full { grid-column: span 2; }
@@ -3132,6 +3139,9 @@
         method="POST"
         id="slot-booking-form">
         <input type="hidden" name="form_type" value="Slot Booking">
+        <div class="form-honeypot" aria-hidden="true">
+          <label>Website<input type="text" name="website" tabindex="-1" autocomplete="off"></label>
+        </div>
         <div class="form-grid">
           <div class="form-group">
             <label>Full Name</label>
@@ -3186,6 +3196,9 @@
         id="tournament-booking-form">
         <input type="hidden" name="form_type" value="Tournament Registration">
         <input type="hidden" name="tournament_name" id="tournament-name-hidden" value="">
+        <div class="form-honeypot" aria-hidden="true">
+          <label>Website<input type="text" name="website" tabindex="-1" autocomplete="off"></label>
+        </div>
         <div class="tournament-name-banner" id="tournament-name-banner">
           <span class="banner-label">Registering for</span>
           <div class="banner-name" id="tournament-banner-name">—</div>

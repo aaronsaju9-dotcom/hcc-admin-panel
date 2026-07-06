@@ -68,7 +68,7 @@ The app can use Supabase Auth for real admin accounts.
    - `ADMIN_EMAILS=owner@example.com,manager@example.com`
 4. Restart/redeploy.
 
-The existing `ADMIN_USER` / `ADMIN_PASSWORD` login remains as a fallback. Use a strong fallback password.
+When `SUPABASE_AUTH_ENABLED=true`, the local `ADMIN_USER` / `ADMIN_PASSWORD` login is disabled by default. Set `ALLOW_LOCAL_ADMIN=true` only for a short, deliberate emergency window, then disable it again.
 
 `ADMIN_EMAILS` means the Supabase Auth email addresses allowed into the admin panel. Example:
 
@@ -91,7 +91,12 @@ Hidden content stays out of the public website. Display order controls sorting a
 Included server hardening:
 
 - Login and API rate limiting
-- Security headers
+- Content Security Policy and anti-framing headers
+- Same-origin checks for all write requests
+- Eight-hour admin session expiry by default
+- Exact public-file allowlist that blocks server source, data files, and deployment documentation
+- Production local-admin fallback disabled when Supabase Auth is enabled
+- Form honeypot, field allowlist, and input-length limits
 - `GET /health`
 - `GET /robots.txt`
 - `GET /sitemap.xml`
@@ -129,6 +134,9 @@ Set these environment variables before hosting:
 ADMIN_USER=your-user
 ADMIN_PASSWORD=your-strong-password
 SESSION_SECRET=another-long-random-secret
+ADMIN_SESSION_HOURS=8
+ALLOW_LOCAL_ADMIN=false
+PUBLIC_ORIGIN=https://your-domain.example
 SUPABASE_URL=https://your-project-ref.supabase.co
 SUPABASE_ANON_KEY=your-public-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-server-only-service-role-key
@@ -154,7 +162,9 @@ For production, use Supabase Auth:
 
 Admins listed in `ADMIN_EMAILS` can request a reset email. Logged-in Supabase admins can also change their password from **Settings** inside the admin panel.
 
-The fallback `ADMIN_USER` / `ADMIN_PASSWORD` account is only an emergency login. Its password lives in Render environment variables, so it cannot be changed from the browser.
+The local `ADMIN_USER` / `ADMIN_PASSWORD` account is intended for local development. It is disabled whenever Supabase Auth is enabled unless `ALLOW_LOCAL_ADMIN=true` is explicitly set.
+
+Admin cookies are signed, `HttpOnly`, `SameSite=Lax`, `Secure` in production, and expire after `ADMIN_SESSION_HOURS` (eight hours by default). Changing `SESSION_SECRET` immediately invalidates every existing admin session.
 
 ### Backups
 
@@ -188,6 +198,9 @@ If the audit table is missing, the app falls back to `data/audit.json` and conte
    - `ADMIN_USER`
    - `ADMIN_PASSWORD`
    - `SESSION_SECRET`
+   - `ADMIN_SESSION_HOURS=8`
+   - `ALLOW_LOCAL_ADMIN=false`
+   - `PUBLIC_ORIGIN=https://your-domain.example`
    - `SUPABASE_URL`
    - `SUPABASE_ANON_KEY`
    - `SUPABASE_SERVICE_ROLE_KEY`
@@ -218,3 +231,16 @@ If the audit table is missing, the app falls back to `data/audit.json` and conte
 - Uploaded images are stored as Cloudinary URLs when Cloudinary env vars are configured. Base64 local fallback is development only.
 - The admin session is cookie based. Use `SUPABASE_AUTH_ENABLED=true` and `ADMIN_EMAILS` for real admin accounts.
 - Keep database backups or periodic JSON exports.
+
+## Security Verification And Key Rotation
+
+Run the automated route, header, origin, login, honeypot, and session checks before deployment:
+
+```bash
+npm run check
+npm run test:security
+```
+
+If a Supabase service-role key is ever exposed, rotate it in the Supabase dashboard, replace `SUPABASE_SERVICE_ROLE_KEY` in Render, and redeploy. Also generate a new `SESSION_SECRET` during client handover so previously issued admin sessions stop working.
+
+After connecting the final domain, set `PUBLIC_ORIGIN` to the full HTTPS origin, for example `https://hamriyahcricket.ae`. This value is used for password-reset links, `robots.txt`, and `sitemap.xml`.
