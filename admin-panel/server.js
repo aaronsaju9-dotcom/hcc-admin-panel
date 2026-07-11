@@ -1009,16 +1009,243 @@ function authMode() {
 function sendLegalPage(response, type) {
   const isPrivacy = type === "privacy";
   const title = isPrivacy ? "Privacy Policy" : "Terms of Use";
-  const body = isPrivacy
+  const sections = isPrivacy
     ? [
-      "Hamriyah Cricket Centre collects booking and tournament registration details such as names, phone numbers, email addresses, team details, dates, and notes so the team can respond to enquiries and manage reservations.",
-      "Form submissions are processed through the website server and forwarded to the configured form provider. Uploaded website media is stored in Cloudinary, and admin-managed content is stored in Supabase when configured.",
-      "Contact the centre to request correction or deletion of submitted information."
+      {
+        heading: "1. Who We Are",
+        paragraphs: [
+          "Hamriyah Cricket Centre (\"HCC\", \"we\", \"our\", or \"us\") respects your privacy and is committed to protecting the personal information you provide when you use our website, contact our team, submit booking or tournament enquiries, or otherwise interact with our services.",
+          "Hamriyah Cricket Centre is a cricket facility and sports venue located in Hamriyah, Sharjah, United Arab Emirates. Our website is intended to provide information about our venue, facilities, tournaments, media, contact details, and booking or registration enquiries."
+        ]
+      },
+      {
+        heading: "2. Information We Collect",
+        paragraphs: [
+          "We may collect personal information that you voluntarily provide to us, including your full name, phone number, email address, team name or organization name, booking details, tournament registration details, preferred dates and times, messages, comments, notes, and any other information you choose to provide through forms or direct contact.",
+          "We may also collect limited technical information automatically when you use the website, such as your IP address, browser type, device type, referring pages, access times, and basic website usage, security, and error log information."
+        ]
+      },
+      {
+        heading: "3. How We Collect Information",
+        paragraphs: [
+          "We collect information when you submit a booking enquiry, register interest in a tournament, contact us by form, email, or phone, when an administrator uploads or manages content through the admin system, and when your browser interacts with the website for technical, security, or performance purposes."
+        ]
+      },
+      {
+        heading: "4. Why We Use Your Information",
+        paragraphs: [
+          "We use your information to respond to booking, enquiry, or registration requests, communicate with you about venue availability, tournaments, schedules, and related services, manage and organize bookings or registrations, improve the content, security, and performance of the website, maintain internal administration records, prevent misuse, spam, fraud, and unauthorized access, and comply with legal or regulatory obligations where applicable.",
+          "We do not sell your personal information to third parties."
+        ]
+      },
+      {
+        heading: "5. Website Forms and Communications",
+        paragraphs: [
+          "When you submit a form through our website, your information may be processed through our website server and forwarded to our configured form handling provider for delivery and response management.",
+          "By submitting a form, you acknowledge that we may contact you by phone, email, or messaging applications in relation to your enquiry, booking, registration, or follow-up service communication."
+        ]
+      },
+      {
+        heading: "6. Media, Admin Content, and Storage Providers",
+        paragraphs: [
+          "Our website and admin system may use third-party services to store or process content, including Supabase for structured website content and admin-related data storage, Cloudinary for website image and media storage, hosting infrastructure providers for application delivery and uptime, and form processing providers for handling contact and booking submissions.",
+          "These services may process information on our behalf as part of the technical operation of the website. We use reasonable efforts to work with service providers that are appropriate for normal commercial website operations."
+        ]
+      },
+      {
+        heading: "7. Cookies and Similar Technologies",
+        paragraphs: [
+          "Our website may use essential technical mechanisms, session tools, and similar technologies required for site functionality, admin access, security, and performance.",
+          "We may also use limited technical data to understand whether pages are functioning correctly and to help protect the website from abuse, spam, malicious traffic, or unauthorized activity. If analytics, advertising, or additional tracking technologies are introduced in the future, this Privacy Policy may be updated accordingly."
+        ]
+      },
+      {
+        heading: "8. Legal Basis and Compliance",
+        paragraphs: [
+          "We aim to handle personal information responsibly and in accordance with applicable laws and regulations, including relevant data protection and privacy rules that may apply in the United Arab Emirates and, where relevant, to users accessing the site from other jurisdictions.",
+          "By using this website or submitting your information, you understand that your data may be processed for legitimate business purposes related to enquiries, bookings, tournament coordination, customer communication, security, and website management."
+        ]
+      },
+      {
+        heading: "9. How Long We Keep Information",
+        paragraphs: [
+          "We retain personal information only for as long as reasonably necessary for responding to your enquiry, managing a booking or registration, maintaining internal business records, resolving disputes, enforcing our policies, and meeting legal, accounting, or administrative obligations."
+        ]
+      },
+      {
+        heading: "10. Data Sharing",
+        paragraphs: [
+          "We may share information only where reasonably necessary, including with service providers supporting website hosting, media storage, content systems, or form handling, with internal staff or authorized administrators who need the information to respond to you or manage operations, where disclosure is required by law, legal process, or regulatory request, or where necessary to protect our rights, property, users, systems, or business operations.",
+          "We do not sell or rent personal information as a standalone business activity."
+        ]
+      },
+      {
+        heading: "11. International Data Processing",
+        paragraphs: [
+          "Some of the third-party tools used by the website may store or process data on servers located outside the United Arab Emirates. By using the site and submitting your information, you understand that such transfers may occur as part of normal website operations.",
+          "We take reasonable steps to use reputable providers, but cross-border processing may still be involved in hosting, storage, delivery, security, or communications."
+        ]
+      },
+      {
+        heading: "12. Data Security",
+        paragraphs: [
+          "We take reasonable technical and organizational measures to protect personal information from unauthorized access, misuse, loss, alteration, or disclosure. However, no website, server, or method of electronic transmission is completely secure, and we cannot guarantee absolute security."
+        ]
+      },
+      {
+        heading: "13. Your Rights",
+        paragraphs: [
+          "Subject to applicable law, you may have the right to request access to personal information we hold about you, correction of inaccurate information, deletion of certain personal information, withdrawal from future non-essential communications, or clarification on how your information is used.",
+          "To make a privacy-related request, please contact us using the details below. We may need to verify your identity before fulfilling certain requests."
+        ]
+      },
+      {
+        heading: "14. Children's Privacy",
+        paragraphs: [
+          "This website is not intentionally directed at young children for independent submission of personal information. If a parent or guardian believes that a child has submitted personal information to us inappropriately, they may contact us and request its review or deletion where appropriate."
+        ]
+      },
+      {
+        heading: "15. Third-Party Links",
+        paragraphs: [
+          "Our website may contain links to third-party websites, maps, social media pages, tournament platforms, or external services. We are not responsible for the privacy practices, content, or policies of external websites or services not controlled by us."
+        ]
+      },
+      {
+        heading: "16. Policy Updates",
+        paragraphs: [
+          "We may update this Privacy Policy from time to time to reflect changes in our operations, technology, service providers, legal requirements, or website features. The updated version will be posted on this page with a revised effective date."
+        ]
+      },
+      {
+        heading: "17. Contact Us",
+        paragraphs: [
+          "If you have any questions about this Privacy Policy or how your information is handled, please contact us.",
+          "Hamriyah Cricket Centre",
+          "Hamriyah West, Sharjah, United Arab Emirates",
+          "Email: info@hamriyahcricketcentre.ae",
+          "Phone: 056 225 5337"
+        ]
+      }
     ]
     : [
-      "Website information, tournament details, availability, and prices may change. Confirm final booking details directly with Hamriyah Cricket Centre.",
-      "Users must submit accurate booking and tournament information. The centre may reject or cancel requests that are incomplete, abusive, or unsuitable.",
-      "All venue usage is subject to the centre's booking confirmation, safety rules, and operational requirements."
+      {
+        heading: "1. About This Website",
+        paragraphs: [
+          "Welcome to the Hamriyah Cricket Centre website. These Terms of Use govern your access to and use of our website, pages, content, forms, and related online services.",
+          "This website is operated by Hamriyah Cricket Centre (\"HCC\", \"we\", \"our\", or \"us\"), located in Hamriyah, Sharjah, United Arab Emirates. The website is provided for general informational, promotional, enquiry, communication, and administrative purposes related to our cricket facilities, bookings, tournaments, media, and business operations."
+        ]
+      },
+      {
+        heading: "2. Acceptance of Terms",
+        paragraphs: [
+          "By visiting, browsing, or interacting with this website, you confirm that you accept these Terms of Use and agree to comply with them. If you are using this website on behalf of a team, company, academy, group, or other organization, you represent that you are authorized to act on its behalf."
+        ]
+      },
+      {
+        heading: "3. Eligibility and Proper Use",
+        paragraphs: [
+          "You agree to use the website only for lawful purposes and in a way that does not violate any applicable law or regulation, infringe the rights of others, interfere with the normal operation of the website, attempt unauthorized access to the admin area, introduce malicious code or harmful material, submit false, misleading, abusive, or fraudulent information, or misuse forms, bookings, registrations, or contact channels."
+        ]
+      },
+      {
+        heading: "4. Informational Nature of Website Content",
+        paragraphs: [
+          "All content on this website is provided for general information only. While we aim to keep the content accurate and up to date, we do not guarantee that all information is complete, current, error-free, or always available.",
+          "This includes tournament details, schedules, fixtures, availability, venue descriptions, facility information, contact details, images, promotional content, and booking-related information. Final booking terms, venue availability, event details, and operational decisions may need to be confirmed directly with Hamriyah Cricket Centre."
+        ]
+      },
+      {
+        heading: "5. No Guaranteed Booking or Registration",
+        paragraphs: [
+          "Submitting a form, enquiry, or tournament interest through the website does not automatically create a confirmed booking, reservation, or participation right. A booking, reservation, or registration is only final when confirmed directly by Hamriyah Cricket Centre through its official communication process.",
+          "We reserve the right to accept, reject, reschedule, cancel, or modify enquiries, bookings, or registrations at our discretion and subject to operational requirements."
+        ]
+      },
+      {
+        heading: "6. Tournament and Event Information",
+        paragraphs: [
+          "Tournament listings, prize details, dates, rules, participation conditions, and related content may be added, edited, postponed, or removed without prior notice. Users remain responsible for confirming current details with us before relying on them for travel, payment, team commitments, or scheduling."
+        ]
+      },
+      {
+        heading: "7. Intellectual Property",
+        paragraphs: [
+          "Unless otherwise stated, the website and its contents, including text, design, layout, branding, logos, graphics, photographs, video, media, source presentation, and original written content, are owned by or licensed to Hamriyah Cricket Centre.",
+          "You may view the site for personal and lawful business enquiry purposes only. You may not, without prior written permission, reproduce, republish, distribute, modify, commercially exploit, mirror, scrape, or copy substantial portions of the site except where permitted by law."
+        ]
+      },
+      {
+        heading: "8. User Submissions",
+        paragraphs: [
+          "When you submit information to us through a form or communication channel, you confirm that the information is accurate to the best of your knowledge, that you have the right to provide it, and that it does not violate any law or third-party right.",
+          "We may remove, ignore, refuse, or not respond to submissions that appear inappropriate, incomplete, suspicious, or operationally unsuitable."
+        ]
+      },
+      {
+        heading: "9. Admin and Restricted Access",
+        paragraphs: [
+          "Certain parts of the website, including the admin panel and administrative functions, are restricted to authorized personnel only. You must not attempt to access, probe, bypass, disrupt, reverse engineer, or interfere with any restricted area, login system, security measure, or backend function of the website."
+        ]
+      },
+      {
+        heading: "10. Third-Party Services and Links",
+        paragraphs: [
+          "This website may integrate with or link to third-party tools, platforms, maps, social media pages, media services, communication services, or data infrastructure providers. We do not control third-party websites or services and are not responsible for their availability, policies, security, content, or performance."
+        ]
+      },
+      {
+        heading: "11. Disclaimer of Warranties",
+        paragraphs: [
+          "To the maximum extent permitted by applicable law, the website is provided on an \"as is\" and \"as available\" basis. We do not make warranties or representations, express or implied, regarding site availability, uninterrupted or error-free operation, completeness or accuracy of content, suitability for a particular purpose, or absence of bugs, security incidents, or technical issues."
+        ]
+      },
+      {
+        heading: "12. Limitation of Liability",
+        paragraphs: [
+          "To the fullest extent permitted by law, Hamriyah Cricket Centre shall not be liable for any direct, indirect, incidental, consequential, special, or business-related loss arising out of or connected with use of or inability to use the website, reliance on website content, booking misunderstandings not yet confirmed by us, tournament changes or cancellations, technical errors, outages, delays, interruptions, unauthorized access by third parties, or external websites and third-party services."
+        ]
+      },
+      {
+        heading: "13. Indemnity",
+        paragraphs: [
+          "You agree to indemnify and hold harmless Hamriyah Cricket Centre, its owners, staff, operators, administrators, and service providers from claims, liabilities, losses, damages, and expenses arising from your misuse of the website, your breach of these Terms, your unlawful conduct, your infringement of third-party rights, or false or misleading submissions made by you."
+        ]
+      },
+      {
+        heading: "14. Privacy",
+        paragraphs: [
+          "Your use of the website is also subject to our Privacy Policy, which explains how we collect and use personal information."
+        ]
+      },
+      {
+        heading: "15. Suspension or Termination",
+        paragraphs: [
+          "We may restrict, suspend, block, or terminate access to all or part of the website at any time, with or without notice, particularly where we believe there is misuse, technical risk, unauthorized activity, or security concern."
+        ]
+      },
+      {
+        heading: "16. Changes to These Terms",
+        paragraphs: [
+          "We may update these Terms of Use from time to time. The latest version will be posted on this page with the effective date. Your continued use of the website after updated Terms are posted constitutes acceptance of those revised Terms."
+        ]
+      },
+      {
+        heading: "17. Governing Law",
+        paragraphs: [
+          "These Terms of Use shall be governed by and interpreted in accordance with the laws applicable in the United Arab Emirates, without prejudice to any mandatory consumer or legal protections that may apply under relevant law."
+        ]
+      },
+      {
+        heading: "18. Contact Information",
+        paragraphs: [
+          "For questions about these Terms of Use, please contact us.",
+          "Hamriyah Cricket Centre",
+          "Hamriyah West, Sharjah, United Arab Emirates",
+          "Email: info@hamriyahcricketcentre.ae",
+          "Phone: 056 225 5337"
+        ]
+      }
     ];
   response.writeHead(200, commonHeaders({ "Content-Type": "text/html; charset=utf-8" }));
   response.end(`<!DOCTYPE html>
@@ -1033,17 +1260,27 @@ function sendLegalPage(response, type) {
     main { width:min(820px, calc(100% - 32px)); margin:0 auto; padding:72px 0; }
     a { color:#0b5a38; font-weight:700; }
     h1 { margin:0 0 18px; font-size:clamp(2rem,6vw,4rem); line-height:1; color:#c8101e; }
-    p { color:#3f4a43; font-size:1rem; }
+    h2 { margin:28px 0 10px; font-size:1.2rem; color:#0c5333; }
+    p { color:#3f4a43; font-size:1rem; margin:0 0 14px; }
     .card { background:#fff; border:1px solid rgba(12,83,51,.16); border-radius:8px; padding:28px; box-shadow:0 18px 54px rgba(6,53,31,.09); }
+    .eyebrow { display:inline-block; margin-bottom:12px; font-size:.8rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#0c5333; }
+    .updated { margin-top:24px; padding-top:18px; border-top:1px solid rgba(12,83,51,.12); color:#69746d; }
   </style>
 </head>
 <body>
   <main>
     <p><a href="/">Back to website</a></p>
     <div class="card">
+      <span class="eyebrow">Hamriyah Cricket Centre</span>
       <h1>${title}</h1>
-      ${body.map((paragraph) => `<p>${paragraph}</p>`).join("")}
-      <p>Last updated: June 26, 2026</p>
+      <p>Effective Date: [Insert Date]</p>
+      ${sections.map((section) => `
+        <section>
+          <h2>${section.heading}</h2>
+          ${section.paragraphs.map((paragraph) => `<p>${paragraph}</p>`).join("")}
+        </section>
+      `).join("")}
+      <p class="updated">Last updated: [Insert Date]</p>
     </div>
   </main>
 </body>
