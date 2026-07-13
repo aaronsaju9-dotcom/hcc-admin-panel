@@ -52,6 +52,7 @@ async function checkHardenedProduction() {
     PORT: port,
     NODE_ENV: "production",
     TRUST_PROXY: "false",
+    PUBLIC_ORIGIN: `http://${HOST}:${port}`,
     SUPABASE_AUTH_ENABLED: "true",
     SUPABASE_URL: "",
     SUPABASE_ANON_KEY: "",
@@ -102,6 +103,11 @@ async function checkHardenedProduction() {
       body: JSON.stringify({ website: "https://spam.example" })
     });
     assert.equal(honeypot.status, 200);
+
+    const sitemap = await request(origin, "/sitemap.xml", {
+      headers: { Host: "attacker.example" }
+    });
+    assert.match(await sitemap.text(), new RegExp(`http://${HOST}:${port}`));
   });
 }
 
@@ -111,6 +117,7 @@ async function checkExpiringLocalSession() {
     PORT: port,
     NODE_ENV: "production",
     TRUST_PROXY: "false",
+    PUBLIC_ORIGIN: `http://${HOST}:${port}`,
     SUPABASE_AUTH_ENABLED: "false",
     ADMIN_SESSION_HOURS: "1",
     ADMIN_USER: "local-owner",

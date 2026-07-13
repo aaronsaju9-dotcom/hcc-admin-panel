@@ -1,15 +1,17 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 const PORT = Number(process.env.PORT || 8765);
 const ROOT = __dirname;
 const DATA_DIR = path.join(ROOT, "data");
 const CONTENT_FILE = path.join(DATA_DIR, "content.json");
 const AUDIT_FILE = path.join(DATA_DIR, "audit.json");
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const ADMIN_USER = process.env.ADMIN_USER || "admin";
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "change-this-password";
-const SESSION_SECRET = process.env.SESSION_SECRET || ADMIN_PASSWORD;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
+const SESSION_SECRET = process.env.SESSION_SECRET || (IS_PRODUCTION ? "" : crypto.randomBytes(32).toString("hex"));
 const SESSION_COOKIE = "hcc_admin_session";
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "";
@@ -29,12 +31,44 @@ const CLOUDINARY_API_SECRET = process.env.CLOUDINARY_API_SECRET || "";
 const CLOUDINARY_FOLDER = process.env.CLOUDINARY_FOLDER || "hcc-website";
 const FORMSPREE_ENDPOINT = process.env.FORMSPREE_ENDPOINT || "";
 const TRUST_PROXY = process.env.TRUST_PROXY === "true";
-const IS_PRODUCTION = process.env.NODE_ENV === "production";
-const PUBLIC_ORIGIN = String(process.env.PUBLIC_ORIGIN || "").replace(/\/$/, "");
+const PUBLIC_ORIGIN = parseOrigin(process.env.PUBLIC_ORIGIN || "");
 const SESSION_TTL_MS = Math.max(1, Number(process.env.ADMIN_SESSION_HOURS || 8)) * 60 * 60 * 1000;
 const MAX_JSON_BYTES = 30 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const rateLimits = new Map();
+
+function parseOrigin(value) {
+  try {
+    const parsed = new URL(String(value || "").trim());
+    return /^https?:$/.test(parsed.protocol) ? parsed.origin : "";
+  } catch {
+    return "";
+  }
+}
+
+function getTrustedOrigin(request) {
+  if (PUBLIC_ORIGIN) return PUBLIC_ORIGIN;
+  if (IS_PRODUCTION) {
+    throw new Error("PUBLIC_ORIGIN must be configured in production.");
+  }
+  return getRequestOrigin(request);
+}
+
+function validateStartupConfig() {
+  const issues = [];
+  if (IS_PRODUCTION && !SESSION_SECRET) {
+    issues.push("SESSION_SECRET must be configured in production.");
+  }
+  if (IS_PRODUCTION && !PUBLIC_ORIGIN) {
+    issues.push("PUBLIC_ORIGIN must be configured in production.");
+  }
+  if (ALLOW_LOCAL_ADMIN && !ADMIN_PASSWORD) {
+    issues.push("ADMIN_PASSWORD must be configured when ALLOW_LOCAL_ADMIN=true.");
+  }
+  if (issues.length) {
+    throw new Error(issues.join(" "));
+  }
+}
 
 const publicFiles = new Map([
   ["/site.html", "site.html"],
@@ -518,7 +552,7 @@ function timingSafeEqual(a, b) {
 }
 
 function signSession(value) {
-  return require("crypto")
+  return crypto
     .createHmac("sha256", SESSION_SECRET)
     .update(value)
     .digest("hex");
@@ -535,7 +569,7 @@ function makeSessionObjectValue(session) {
 }
 
 function localAdminEnabled() {
-  return !SUPABASE_AUTH_ENABLED || ALLOW_LOCAL_ADMIN;
+  return Boolean(ADMIN_PASSWORD) && (!SUPABASE_AUTH_ENABLED || ALLOW_LOCAL_ADMIN);
 }
 
 function parseCookies(request) {
@@ -752,7 +786,7 @@ function isSameOriginWrite(request) {
   const suppliedOrigin = request.headers.origin || request.headers.referer;
   if (!suppliedOrigin) return true;
   try {
-    return new URL(suppliedOrigin).origin === getRequestOrigin(request);
+    return new URL(suppliedOrigin).origin === getTrustedOrigin(request);
   } catch {
     return false;
   }
@@ -827,7 +861,7 @@ async function sendSupabasePasswordReset(email, request) {
     return { ok: true };
   }
 
-  const redirectTo = `${getOrigin(request)}/reset-password`;
+  const redirectTo = `${getTrustedOrigin(request)}/reset-password`;
   const resetResponse = await fetch(`${SUPABASE_URL}/auth/v1/recover?redirect_to=${encodeURIComponent(redirectTo)}`, {
     method: "POST",
     headers: {
@@ -979,25 +1013,30 @@ function serveFile(requestUrl, response) {
 }
 
 function sendRobots(request, response) {
-  const origin = getOrigin(request);
+  const origin = getTrustedOrigin(request);
   response.writeHead(200, commonHeaders({ "Content-Type": "text/plain; charset=utf-8" }));
   response.end(`User-agent: *\nDisallow: /admin\nDisallow: /login\nSitemap: ${origin}/sitemap.xml\n`);
 }
 
 function sendSitemap(request, response) {
-  const origin = getOrigin(request);
+  const origin = getTrustedOrigin(request);
   response.writeHead(200, commonHeaders({ "Content-Type": "application/xml; charset=utf-8" }));
   response.end(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>${origin}/</loc><priority>1.0</priority></url>\n  <url><loc>${origin}/privacy</loc><priority>0.3</priority></url>\n  <url><loc>${origin}/terms</loc><priority>0.3</priority></url>\n</urlset>\n`);
 }
 
 function getOrigin(request) {
-  if (PUBLIC_ORIGIN) return PUBLIC_ORIGIN;
-  return getRequestOrigin(request);
+  return getTrustedOrigin(request);
 }
 
 function getRequestOrigin(request) {
-  const protocol = TRUST_PROXY && request.headers["x-forwarded-proto"] ? request.headers["x-forwarded-proto"] : "http";
-  return `${String(protocol).split(",")[0].trim()}://${request.headers.host || `localhost:${PORT}`}`;
+  const protocol = TRUST_PROXY && request.headers["x-forwarded-proto"]
+    ? String(request.headers["x-forwarded-proto"]).split(",")[0].trim()
+    : (request.socket.encrypted ? "https" : "http");
+  const host = String(request.headers.host || `localhost:${PORT}`).split(",")[0].trim().toLowerCase();
+  if (!/^[a-z0-9.-]+(?::\d+)?$/i.test(host)) {
+    return `http://localhost:${PORT}`;
+  }
+  return `${protocol}://${host}`;
 }
 
 function authMode() {
@@ -1477,7 +1516,7 @@ const server = http.createServer(async (request, response) => {
       }
       const session = getSession(request);
       if (!session || session.provider !== "supabase") {
-        sendJson(response, 400, { error: "Password changes are available for Supabase admin accounts. Change fallback ADMIN_PASSWORD in Render env." });
+        sendJson(response, 400, { error: "Password changes are available for Supabase admin accounts. Configure ADMIN_PASSWORD only if you intentionally enable local admin." });
         return;
       }
       const payload = JSON.parse(await readBody(request));
@@ -1513,6 +1552,7 @@ const server = http.createServer(async (request, response) => {
   }
 });
 
+validateStartupConfig();
 ensureContentFile();
 server.listen(PORT, () => {
   console.log(`HCC website running at http://localhost:${PORT}/`);
