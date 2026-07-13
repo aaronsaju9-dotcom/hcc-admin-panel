@@ -4,7 +4,7 @@ const path = require("path");
 const crypto = require("crypto");
 
 const PORT = Number(process.env.PORT || 8765);
-const ROOT = __dirname;
+const ROOT = path.resolve(__dirname);
 const DATA_DIR = path.join(ROOT, "data");
 const CONTENT_FILE = path.join(DATA_DIR, "content.json");
 const AUDIT_FILE = path.join(DATA_DIR, "audit.json");
@@ -71,13 +71,13 @@ function validateStartupConfig() {
 }
 
 const publicFiles = new Map([
-  ["/site.html", "site.html"],
-  ["/logo.png", "logo.png"],
-  ["/hero-bg-cricket.png", "hero-bg-cricket.png"],
-  ["/hero-cricket.mp4", "hero-cricket.mp4"],
-  ["/index.html", "index.html"],
-  ["/admin.css", "admin.css"],
-  ["/admin.js", "admin.js"]
+  ["/site.html", path.resolve(ROOT, "site.html")],
+  ["/logo.png", path.resolve(ROOT, "logo.png")],
+  ["/hero-bg-cricket.png", path.resolve(ROOT, "hero-bg-cricket.png")],
+  ["/hero-cricket.mp4", path.resolve(ROOT, "hero-cricket.mp4")],
+  ["/index.html", path.resolve(ROOT, "index.html")],
+  ["/admin.css", path.resolve(ROOT, "admin.css")],
+  ["/admin.js", path.resolve(ROOT, "admin.js")]
 ]);
 
 const mimeTypes = {
@@ -988,13 +988,17 @@ function serveFile(requestUrl, response) {
   if (routePath === "/") routePath = "/site.html";
   if (routePath === "/admin") routePath = "/index.html";
   const pathname = decodeURIComponent(routePath);
-  const fileName = publicFiles.get(pathname);
-  if (!fileName) {
+  const safePath = publicFiles.get(pathname);
+  if (!safePath) {
     response.writeHead(404, commonHeaders({ "Content-Type": "text/plain; charset=utf-8" }));
     response.end("Not found");
     return;
   }
-  const safePath = path.join(ROOT, fileName);
+  if (!safePath.startsWith(`${ROOT}${path.sep}`)) {
+    response.writeHead(400, commonHeaders({ "Content-Type": "text/plain; charset=utf-8" }));
+    response.end("Invalid path");
+    return;
+  }
 
   fs.readFile(safePath, (error, file) => {
     if (error) {

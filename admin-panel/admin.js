@@ -101,6 +101,27 @@ let cachedUploads = {
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
+function clearElement(element) {
+  if (element) element.replaceChildren();
+}
+
+function appendTextElement(parent, tagName, text, className = "") {
+  const element = document.createElement(tagName);
+  if (className) element.className = className;
+  element.textContent = text;
+  parent.appendChild(element);
+  return element;
+}
+
+function appendPill(parent, text, className = "") {
+  return appendTextElement(parent, "span", text, `pill${className ? ` ${className}` : ""}`);
+}
+
+function appendEmptyState(container, text) {
+  clearElement(container);
+  appendTextElement(container, "div", text, "empty");
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   bindNavigation();
   bindForms();
@@ -797,12 +818,15 @@ function renderSessionStatus() {
       ["Image storage", sessionInfo?.imageStorage || "Unknown"],
       ["Forms", sessionInfo?.forms || "Unknown"]
     ];
-    $("#sessionStatus").innerHTML = rows.map(([label, value]) => `
-      <div class="status-row">
-        <span>${escapeHtml(label)}</span>
-        <strong>${escapeHtml(value)}</strong>
-      </div>
-    `).join("");
+    const container = $("#sessionStatus");
+    clearElement(container);
+    rows.forEach(([label, value]) => {
+      const row = document.createElement("div");
+      row.className = "status-row";
+      appendTextElement(row, "span", label);
+      appendTextElement(row, "strong", value);
+      container.appendChild(row);
+    });
   }
 }
 
@@ -819,14 +843,20 @@ function renderActivity() {
     created_at: entry.time,
     actor: "This browser"
   }));
-  $("#activityList").innerHTML = rows.length
-    ? rows.slice(0, 12).map((entry) => `
-      <div class="activity-item">
-        <strong>${escapeHtml(formatAuditAction(entry.action || entry.message))}</strong>
-        <br>${escapeHtml(entry.actor || "Unknown")} · ${escapeHtml(formatAuditTime(entry.created_at || entry.time))}
-      </div>
-    `).join("")
-    : `<div class="empty">No audit activity yet. Save something and it will appear here.</div>`;
+  const container = $("#activityList");
+  clearElement(container);
+  if (!rows.length) {
+    appendEmptyState(container, "No audit activity yet. Save something and it will appear here.");
+    return;
+  }
+  rows.slice(0, 12).forEach((entry) => {
+    const item = document.createElement("div");
+    item.className = "activity-item";
+    appendTextElement(item, "strong", formatAuditAction(entry.action || entry.message));
+    item.appendChild(document.createElement("br"));
+    item.append(document.createTextNode(`${entry.actor || "Unknown"} · ${formatAuditTime(entry.created_at || entry.time)}`));
+    container.appendChild(item);
+  });
 }
 
 function formatAuditAction(action) {
@@ -845,11 +875,20 @@ function formatAuditTime(value) {
 function renderQuickPreview() {
   const nextTournament = sortByOrder(data.tournaments).find((item) => item.published !== false);
   const visibleSocials = data.socials.filter((social) => social.visible && social.published !== false).length;
-  $("#quickPreview").innerHTML = `
-    <div class="preview-item"><span class="pill red">Next</span><h3>${escapeHtml(nextTournament?.name || "No tournaments")}</h3><p class="item-meta">${escapeHtml(nextTournament?.date || "Add a date")}</p></div>
-    <div class="preview-item"><span class="pill">Gallery</span><h3>${data.images.length} managed images</h3></div>
-    <div class="preview-item"><span class="pill">Social</span><h3>${visibleSocials} visible social links</h3></div>
-  `;
+  const container = $("#quickPreview");
+  clearElement(container);
+  [
+    { label: "Next", labelClass: "red", title: nextTournament?.name || "No tournaments", meta: nextTournament?.date || "Add a date" },
+    { label: "Gallery", labelClass: "", title: `${data.images.length} managed images`, meta: "" },
+    { label: "Social", labelClass: "", title: `${visibleSocials} visible social links`, meta: "" }
+  ].forEach((item) => {
+    const preview = document.createElement("div");
+    preview.className = "preview-item";
+    appendPill(preview, item.label, item.labelClass);
+    appendTextElement(preview, "h3", item.title);
+    if (item.meta) appendTextElement(preview, "p", item.meta, "item-meta");
+    container.appendChild(preview);
+  });
 }
 
 function renderTournaments() {
@@ -857,97 +896,186 @@ function renderTournaments() {
   const items = sortByOrder(data.tournaments).filter((item) => {
     return [item.name, item.status, item.date, item.prize, item.description].join(" ").toLowerCase().includes(query);
   });
+  const container = $("#tournamentList");
+  clearElement(container);
+  if (!items.length) {
+    appendEmptyState(container, "No tournaments found.");
+    return;
+  }
+  items.forEach((item) => {
+    const article = document.createElement("article");
+    article.className = "item-card";
+    article.dataset.id = item.id;
 
-  $("#tournamentList").innerHTML = items.length
-    ? items.map((item) => `
-      <article class="item-card" data-id="${escapeAttr(item.id)}">
-        <div class="item-thumb">${item.poster ? `<img src="${escapeAttr(item.poster)}" alt="">` : "HCC"}</div>
-        <div>
-          <h3 class="item-title">${escapeHtml(item.name)}</h3>
-          <div class="item-meta">
-            <span class="pill ${item.status === "ongoing" ? "red" : ""}">${escapeHtml(item.status)}</span>
-            <span class="pill ${item.published === false ? "red" : ""}">${item.published === false ? "Hidden" : "Published"}</span>
-            ${item.featured ? `<span class="pill">Featured</span>` : ""}
-            <span>Order ${escapeHtml(item.order || "-")}</span>
-            <span>${formatDate(item.date)}</span>
-            <span>${escapeHtml(item.prize || "No prize")}</span>
-          </div>
-          <p class="item-meta">${escapeHtml(item.description || "No description")}</p>
-        </div>
-        <div class="item-actions">
-          <button class="icon-btn" type="button" onclick="editTournament('${escapeAttr(item.id)}')">Edit</button>
-        </div>
-      </article>
-    `).join("")
-    : `<div class="empty">No tournaments found.</div>`;
+    const thumb = document.createElement("div");
+    thumb.className = "item-thumb";
+    if (item.poster) {
+      const img = document.createElement("img");
+      img.src = item.poster;
+      img.alt = "";
+      thumb.appendChild(img);
+    } else {
+      thumb.textContent = "HCC";
+    }
+
+    const body = document.createElement("div");
+    appendTextElement(body, "h3", item.name, "item-title");
+    const meta = document.createElement("div");
+    meta.className = "item-meta";
+    appendPill(meta, item.status, item.status === "ongoing" ? "red" : "");
+    appendPill(meta, item.published === false ? "Hidden" : "Published", item.published === false ? "red" : "");
+    if (item.featured) appendPill(meta, "Featured");
+    appendTextElement(meta, "span", `Order ${item.order || "-"}`);
+    appendTextElement(meta, "span", formatDate(item.date));
+    appendTextElement(meta, "span", item.prize || "No prize");
+    body.appendChild(meta);
+    appendTextElement(body, "p", item.description || "No description", "item-meta");
+
+    const actions = document.createElement("div");
+    actions.className = "item-actions";
+    const button = document.createElement("button");
+    button.className = "icon-btn";
+    button.type = "button";
+    button.textContent = "Edit";
+    button.addEventListener("click", () => editTournament(item.id));
+    actions.appendChild(button);
+
+    article.append(thumb, body, actions);
+    container.appendChild(article);
+  });
 }
 
 function renderImages() {
   const items = sortByOrder(data.images);
-  $("#imageList").innerHTML = items.length
-    ? items.map((item) => `
-      <article class="image-card" data-id="${escapeAttr(item.id)}">
-        <div class="image-frame">${item.src ? `<img src="${escapeAttr(item.src)}" alt="${escapeAttr(item.alt)}">` : "Image"}</div>
-        <div class="image-card-body">
-          <h3>${escapeHtml(item.title)}</h3>
-          <div class="item-meta">
-            <span class="pill">${escapeHtml(item.placement)}</span>
-            <span class="pill ${item.published === false ? "red" : ""}">${item.published === false ? "Hidden" : "Published"}</span>
-            ${item.featured ? `<span class="pill">Featured</span>` : ""}
-            <span>Order ${escapeHtml(item.order || "-")}</span>
-          </div>
-          <button class="icon-btn" type="button" onclick="editImage('${escapeAttr(item.id)}')">Edit</button>
-        </div>
-      </article>
-    `).join("")
-    : `<div class="empty">No images added.</div>`;
+  const container = $("#imageList");
+  clearElement(container);
+  if (!items.length) {
+    appendEmptyState(container, "No images added.");
+    return;
+  }
+  items.forEach((item) => {
+    const article = document.createElement("article");
+    article.className = "image-card";
+    article.dataset.id = item.id;
+
+    const frame = document.createElement("div");
+    frame.className = "image-frame";
+    if (item.src) {
+      const img = document.createElement("img");
+      img.src = item.src;
+      img.alt = item.alt || "";
+      frame.appendChild(img);
+    } else {
+      frame.textContent = "Image";
+    }
+
+    const body = document.createElement("div");
+    body.className = "image-card-body";
+    appendTextElement(body, "h3", item.title);
+    const meta = document.createElement("div");
+    meta.className = "item-meta";
+    appendPill(meta, item.placement);
+    appendPill(meta, item.published === false ? "Hidden" : "Published", item.published === false ? "red" : "");
+    if (item.featured) appendPill(meta, "Featured");
+    appendTextElement(meta, "span", `Order ${item.order || "-"}`);
+    body.appendChild(meta);
+    const button = document.createElement("button");
+    button.className = "icon-btn";
+    button.type = "button";
+    button.textContent = "Edit";
+    button.addEventListener("click", () => editImage(item.id));
+    body.appendChild(button);
+
+    article.append(frame, body);
+    container.appendChild(article);
+  });
 }
 
 function renderSocials() {
   const items = sortByOrder(data.socials);
-  $("#socialList").innerHTML = items.length
-    ? items.map((item) => `
-      <article class="item-card no-media" data-id="${escapeAttr(item.id)}">
-        <div>
-          <h3 class="item-title">${escapeHtml(item.label)}</h3>
-          <div class="item-meta">
-            <span class="pill">${escapeHtml(item.platform)}</span>
-            <span class="pill ${item.visible ? "" : "red"}">${item.visible ? "Visible" : "Hidden"}</span>
-            <span>Order ${escapeHtml(item.order || "-")}</span>
-          </div>
-          <p class="item-meta">${escapeHtml(item.url)}</p>
-        </div>
-        <div class="item-actions">
-          <button class="icon-btn" type="button" onclick="editSocial('${escapeAttr(item.id)}')">Edit</button>
-        </div>
-      </article>
-    `).join("")
-    : `<div class="empty">No social links added.</div>`;
+  const container = $("#socialList");
+  clearElement(container);
+  if (!items.length) {
+    appendEmptyState(container, "No social links added.");
+    return;
+  }
+  items.forEach((item) => {
+    const article = document.createElement("article");
+    article.className = "item-card no-media";
+    article.dataset.id = item.id;
+
+    const body = document.createElement("div");
+    appendTextElement(body, "h3", item.label, "item-title");
+    const meta = document.createElement("div");
+    meta.className = "item-meta";
+    appendPill(meta, item.platform);
+    appendPill(meta, item.visible ? "Visible" : "Hidden", item.visible ? "" : "red");
+    appendTextElement(meta, "span", `Order ${item.order || "-"}`);
+    body.appendChild(meta);
+    appendTextElement(body, "p", item.url, "item-meta");
+
+    const actions = document.createElement("div");
+    actions.className = "item-actions";
+    const button = document.createElement("button");
+    button.className = "icon-btn";
+    button.type = "button";
+    button.textContent = "Edit";
+    button.addEventListener("click", () => editSocial(item.id));
+    actions.appendChild(button);
+
+    article.append(body, actions);
+    container.appendChild(article);
+  });
 }
 
 function renderTestimonials() {
   const items = sortByOrder(data.testimonials);
-  $("#testimonialList").innerHTML = items.length
-    ? items.map((item) => `
-      <article class="item-card" data-id="${escapeAttr(item.id)}">
-        <div class="item-thumb">${item.avatar ? `<img src="${escapeAttr(item.avatar)}" alt="">` : initials(item.name)}</div>
-        <div>
-          <h3 class="item-title">${escapeHtml(item.name)}</h3>
-          <div class="item-meta">
-            <span class="pill">${item.rating}/5 stars</span>
-            <span class="pill ${item.published === false ? "red" : ""}">${item.published === false ? "Hidden" : "Published"}</span>
-            ${item.featured ? `<span class="pill">Featured</span>` : ""}
-            <span>Order ${escapeHtml(item.order || "-")}</span>
-            <span>${escapeHtml(item.role || "No role")}</span>
-          </div>
-          <p class="item-meta">${escapeHtml(item.text)}</p>
-        </div>
-        <div class="item-actions">
-          <button class="icon-btn" type="button" onclick="editTestimonial('${escapeAttr(item.id)}')">Edit</button>
-        </div>
-      </article>
-    `).join("")
-    : `<div class="empty">No testimonials added.</div>`;
+  const container = $("#testimonialList");
+  clearElement(container);
+  if (!items.length) {
+    appendEmptyState(container, "No testimonials added.");
+    return;
+  }
+  items.forEach((item) => {
+    const article = document.createElement("article");
+    article.className = "item-card";
+    article.dataset.id = item.id;
+
+    const thumb = document.createElement("div");
+    thumb.className = "item-thumb";
+    if (item.avatar) {
+      const img = document.createElement("img");
+      img.src = item.avatar;
+      img.alt = "";
+      thumb.appendChild(img);
+    } else {
+      thumb.textContent = initials(item.name);
+    }
+
+    const body = document.createElement("div");
+    appendTextElement(body, "h3", item.name, "item-title");
+    const meta = document.createElement("div");
+    meta.className = "item-meta";
+    appendPill(meta, `${item.rating}/5 stars`);
+    appendPill(meta, item.published === false ? "Hidden" : "Published", item.published === false ? "red" : "");
+    if (item.featured) appendPill(meta, "Featured");
+    appendTextElement(meta, "span", `Order ${item.order || "-"}`);
+    appendTextElement(meta, "span", item.role || "No role");
+    body.appendChild(meta);
+    appendTextElement(body, "p", item.text, "item-meta");
+
+    const actions = document.createElement("div");
+    actions.className = "item-actions";
+    const button = document.createElement("button");
+    button.className = "icon-btn";
+    button.type = "button";
+    button.textContent = "Edit";
+    button.addEventListener("click", () => editTestimonial(item.id));
+    actions.appendChild(button);
+
+    article.append(thumb, body, actions);
+    container.appendChild(article);
+  });
 }
 
 function renderImagePreview(selector, src) {
@@ -956,7 +1084,11 @@ function renderImagePreview(selector, src) {
     preview.textContent = "No image selected";
     return;
   }
-  preview.innerHTML = `<img src="${escapeAttr(src)}" alt="">`;
+  clearElement(preview);
+  const img = document.createElement("img");
+  img.src = src;
+  img.alt = "";
+  preview.appendChild(img);
 }
 
 function exportJson() {
