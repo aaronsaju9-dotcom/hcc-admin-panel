@@ -383,14 +383,25 @@ function clearAuditLog() {
   writeLocalAudit([]);
 }
 
-function sendJson(response, status, payload) {
+function sendJson(response, status, payload, extraHeaders = {}) {
   response.writeHead(status, {
     ...commonHeaders({
       "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store"
+      "Cache-Control": "no-store",
+      ...extraHeaders
     })
   });
   response.end(JSON.stringify(payload, null, 2));
+}
+
+function getStaticCacheControl(extname) {
+  if ([".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".mp4"].includes(extname)) {
+    return "public, max-age=31536000, immutable";
+  }
+  if ([".css", ".js"].includes(extname)) {
+    return "public, max-age=86400";
+  }
+  return "public, max-age=3600";
 }
 
 function makeCloudinarySignature(params) {
@@ -1007,9 +1018,12 @@ function serveFile(requestUrl, response) {
       return;
     }
 
+    const extname = path.extname(safePath).toLowerCase();
+
     response.writeHead(200, {
       ...commonHeaders({
-        "Content-Type": mimeTypes[path.extname(safePath).toLowerCase()] || "application/octet-stream"
+        "Content-Type": mimeTypes[extname] || "application/octet-stream",
+        "Cache-Control": getStaticCacheControl(extname)
       })
     });
     response.end(file);
@@ -1427,7 +1441,9 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.url === "/api/content" && request.method === "GET") {
-      sendJson(response, 200, await readContent());
+      sendJson(response, 200, await readContent(), {
+        "Cache-Control": "public, max-age=60, stale-while-revalidate=300"
+      });
       return;
     }
 
