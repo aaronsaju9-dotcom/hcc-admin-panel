@@ -72,8 +72,8 @@ function validateStartupConfig() {
 
 const publicFiles = new Map([
   ["/site.html", path.resolve(ROOT, "site.html")],
-  ["/logo.png", path.resolve(ROOT, "logo.png")],
-  ["/hero-bg-cricket.png", path.resolve(ROOT, "hero-bg-cricket.png")],
+  ["/logo.webp", path.resolve(ROOT, "logo.webp")],
+  ["/hero-bg-cricket.webp", path.resolve(ROOT, "hero-bg-cricket.webp")],
   ["/hero-cricket.mp4", path.resolve(ROOT, "hero-cricket.mp4")],
   ["/index.html", path.resolve(ROOT, "index.html")],
   ["/admin.css", path.resolve(ROOT, "admin.css")],
@@ -129,14 +129,14 @@ const fallbackContent = {
       title: "HCC Cricket Ground",
       placement: "hero",
       alt: "Hamriyah Cricket Centre ground",
-      src: "hero-bg-cricket.png"
+      src: "hero-bg-cricket.webp"
     },
     {
       id: "img-logo",
       title: "HCC Logo",
       placement: "sponsor",
       alt: "Hamriyah Cricket Centre logo",
-      src: "logo.png"
+      src: "logo.webp"
     }
   ],
   socials: [
@@ -688,7 +688,7 @@ function sendLoginPage(response, errorMessage = "") {
 </head>
 <body>
   <main>
-    <img src="/logo.png" alt="HCC logo">
+    <img src="/logo.webp" alt="HCC logo">
     <h1>Admin Login</h1>
     <p>Sign in to manage tournaments, images, socials, and testimonials.</p>
     <form method="POST" action="/login">
@@ -848,7 +848,7 @@ function sendResetRequestPage(response, message = "", isError = false) {
 </head>
 <body>
   <main>
-    <img src="/logo.png" alt="HCC logo">
+    <img src="/logo.webp" alt="HCC logo">
     <h1>Reset login</h1>
     <p>Enter the admin email. If it is allowed, Supabase will send a secure password reset link.</p>
     <form method="POST" action="/reset-request">
@@ -950,7 +950,7 @@ function sendResetPasswordPage(response) {
 </head>
 <body>
   <main>
-    <img src="/logo.png" alt="HCC logo">
+    <img src="/logo.webp" alt="HCC logo">
     <h1>Reset password</h1>
     <p>Enter a new password for your HCC admin account.</p>
     <form id="resetForm">

@@ -65,7 +65,7 @@ async function checkHardenedProduction() {
     assert.equal(home.status, 200);
     assert.match(home.headers.get("content-security-policy") || "", /frame-ancestors 'none'/);
     assert.equal(home.headers.get("x-frame-options"), "DENY");
-    assert.equal((await request(origin, "/logo.png")).status, 200);
+    assert.equal((await request(origin, "/logo.webp")).status, 200);
     assert.equal((await request(origin, "/api/content")).status, 200);
 
     for (const pathname of ["/server.js", "/package.json", "/README.md", "/supabase-schema.sql", "/data/content.json", "/.env"]) {

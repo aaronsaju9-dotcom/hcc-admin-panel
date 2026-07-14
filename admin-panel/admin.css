@@ -59,7 +59,7 @@ video {
   color: #fff;
   background:
     linear-gradient(160deg, rgba(11, 90, 56, 0.94), rgba(18, 23, 19, 0.98)),
-    url("hero-bg-cricket.png") center/cover;
+    url("hero-bg-cricket.webp") center/cover;
   border-right: 1px solid rgba(255, 255, 255, 0.12);
   display: flex;
   flex-direction: column;

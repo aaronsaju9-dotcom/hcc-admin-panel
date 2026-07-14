@@ -42,14 +42,14 @@ const defaultData = {
       title: "HCC Cricket Ground",
       placement: "hero",
       alt: "Hamriyah Cricket Centre ground",
-      src: "hero-bg-cricket.png"
+      src: "hero-bg-cricket.webp"
     },
     {
       id: "img-logo",
       title: "HCC Logo",
       placement: "sponsor",
       alt: "Hamriyah Cricket Centre logo",
-      src: "logo.png"
+      src: "logo.webp"
     }
   ],
   socials: [
