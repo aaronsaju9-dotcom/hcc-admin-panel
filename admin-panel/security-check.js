@@ -74,6 +74,7 @@ async function checkHardenedProduction() {
 
     assert.equal((await request(origin, "/admin")).status, 302);
     assert.equal((await request(origin, "/api/audit")).status, 401);
+    assert.equal((await request(origin, "/api/bookings")).status, 401);
 
     const crossSite = await request(origin, "/login", {
       method: "POST",
@@ -103,6 +104,18 @@ async function checkHardenedProduction() {
       body: JSON.stringify({ website: "https://spam.example" })
     });
     assert.equal(honeypot.status, 200);
+
+    const invalidBooking = await request(origin, "/api/form-submit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: origin },
+      body: JSON.stringify({
+        form_type: "Slot Booking",
+        fullname: "Test User",
+        phone: "not-a-phone",
+        booking_date: "2026-07-20"
+      })
+    });
+    assert.equal(invalidBooking.status, 400);
 
     const sitemap = await request(origin, "/sitemap.xml", {
       headers: { Host: "attacker.example" }
@@ -146,6 +159,9 @@ async function checkExpiringLocalSession() {
 
     const admin = await request(origin, "/admin", { headers: { Cookie: cookie.split(";", 1)[0] } });
     assert.equal(admin.status, 200);
+    const bookings = await request(origin, "/api/bookings", { headers: { Cookie: cookie.split(";", 1)[0] } });
+    assert.equal(bookings.status, 200);
+    assert.deepEqual((await bookings.json()).bookings, []);
   });
 }
 

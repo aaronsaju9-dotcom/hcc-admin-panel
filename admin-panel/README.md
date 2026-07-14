@@ -1,6 +1,6 @@
 # HCC Admin Panel
 
-This folder contains the admin panel, Supabase-ready content API, and public website preview for Hamriyah Cricket Centre.
+This folder contains the shared website/mobile-app admin panel, Supabase-ready content and booking APIs, and public website preview for Hamriyah Cricket Centre.
 
 ## Local Run
 
@@ -13,6 +13,7 @@ Open:
 - Website: `http://localhost:8765/`
 - Admin: `http://localhost:8765/admin`
 - Content API: `http://localhost:8765/api/content`
+- Protected bookings API: `http://localhost:8765/api/bookings`
 
 Without Supabase environment variables, the app uses `data/content.json` as a local fallback.
 
@@ -28,6 +29,7 @@ This phase stores website content in Supabase instead of relying on `data/conten
    - `SUPABASE_SERVICE_ROLE_KEY`
    - `SUPABASE_CONTENT_TABLE=hcc_site_content`
    - `SUPABASE_AUDIT_TABLE=hcc_admin_audit`
+   - `SUPABASE_BOOKINGS_TABLE=hcc_bookings`
    - `CONTENT_RECORD_ID=main`
 5. Restart the Node app.
 
@@ -119,6 +121,8 @@ FORMSPREE_ENDPOINT=https://formspree.io/f/your-form-id
 
 This keeps the Formspree URL out of `site.html` and lets you change forms from Render env settings.
 
+Every valid booking is saved before it is forwarded, receives a server-generated reference such as `HCC-20260715-A1B2C3D4`, and can be managed from **Bookings** in the admin panel. Status and internal notes are private admin fields. For persistent production booking history, run the latest `supabase-schema.sql` and set `SUPABASE_BOOKINGS_TABLE=hcc_bookings` in Render.
+
 ## Admin Login
 
 The admin panel and content writes are protected by a login page.
@@ -140,6 +144,7 @@ PUBLIC_ORIGIN=https://your-domain.example
 SUPABASE_URL=https://your-project-ref.supabase.co
 SUPABASE_ANON_KEY=your-public-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-server-only-service-role-key
+SUPABASE_BOOKINGS_TABLE=hcc_bookings
 SUPABASE_AUTH_ENABLED=true
 ADMIN_EMAILS=owner@example.com
 CLOUDINARY_CLOUD_NAME=your-cloud-name
@@ -184,6 +189,7 @@ For Supabase persistence, run the latest `supabase-schema.sql`. It creates:
 
 - `public.hcc_site_content`
 - `public.hcc_admin_audit`
+- `public.hcc_bookings`
 
 If the audit table is missing, the app falls back to `data/audit.json` and content edits still work.
 
@@ -205,6 +211,7 @@ If the audit table is missing, the app falls back to `data/audit.json` and conte
    - `SUPABASE_ANON_KEY`
    - `SUPABASE_SERVICE_ROLE_KEY`
    - `SUPABASE_AUDIT_TABLE`
+   - `SUPABASE_BOOKINGS_TABLE=hcc_bookings`
    - `SUPABASE_AUTH_ENABLED`
    - `ADMIN_EMAILS`
    - `CLOUDINARY_CLOUD_NAME`

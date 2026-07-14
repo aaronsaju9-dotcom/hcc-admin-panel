@@ -6,6 +6,7 @@ const API_CLOUDINARY_DELETE_URL = "/api/cloudinary/delete";
 const API_PASSWORD_UPDATE_URL = "/api/password-update";
 const API_PASSWORD_RESET_URL = "/api/password-reset";
 const API_AUDIT_URL = "/api/audit";
+const API_BOOKINGS_URL = "/api/bookings";
 
 const defaultData = {
   tournaments: [
@@ -91,6 +92,7 @@ const defaultData = {
 let data = structuredClone(defaultData);
 let activity = loadActivity();
 let auditEntries = [];
+let bookings = [];
 let sessionInfo = null;
 let cachedUploads = {
   tournamentPoster: null,
@@ -129,6 +131,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   bindFileInputs();
   await loadSession();
   await loadData();
+  await loadBookings();
   await loadAuditEntries();
   renderAll();
   routeFromHash();
@@ -164,6 +167,19 @@ async function loadAuditEntries() {
     auditEntries = Array.isArray(result.entries) ? result.entries : [];
   } catch {
     auditEntries = [];
+  }
+}
+
+async function loadBookings({ notify = false } = {}) {
+  try {
+    const response = await fetch(API_BOOKINGS_URL, { cache: "no-store" });
+    if (!response.ok) throw new Error("Bookings API unavailable");
+    const result = await response.json();
+    bookings = Array.isArray(result.bookings) ? result.bookings : [];
+    if (notify) toast("Bookings refreshed.");
+  } catch {
+    bookings = [];
+    if (notify) toast("Bookings could not be loaded.");
   }
 }
 
@@ -272,6 +288,14 @@ function bindToolbar() {
   });
 
   $("#tournamentSearch").addEventListener("input", renderTournaments);
+  $("#bookingSearch")?.addEventListener("input", renderBookings);
+  $("#bookingStatusFilter")?.addEventListener("change", renderBookings);
+  $("#refreshBookingsBtn")?.addEventListener("click", async () => {
+    await loadBookings({ notify: true });
+    renderBookings();
+    renderStats();
+    renderQuickPreview();
+  });
   $("#newTournamentBtn").addEventListener("click", resetTournamentForm);
   $("#newImageBtn").addEventListener("click", resetImageForm);
   $("#newSocialBtn").addEventListener("click", resetSocialForm);
@@ -793,6 +817,7 @@ function renderAll() {
   renderStats();
   renderActivity();
   renderQuickPreview();
+  renderBookings();
   renderTournaments();
   renderImages();
   renderSocials();
@@ -807,7 +832,7 @@ function renderSessionStatus() {
   }
   if ($("#storageNote")) {
     $("#storageNote").textContent = sessionInfo
-      ? `Auth: ${sessionInfo.auth}. Forms: ${sessionInfo.forms}.`
+      ? `Auth: ${sessionInfo.auth}. Bookings: ${sessionInfo.bookingStorage}. Forms: ${sessionInfo.forms}.`
       : "Could not read server status yet.";
   }
   if ($("#sessionStatus")) {
@@ -815,6 +840,7 @@ function renderSessionStatus() {
       ["Signed in as", sessionInfo?.identity || "Unknown"],
       ["Login type", sessionInfo?.provider || "Unknown"],
       ["Content storage", sessionInfo?.contentStorage || "Unknown"],
+      ["Booking storage", sessionInfo?.bookingStorage || "Unknown"],
       ["Image storage", sessionInfo?.imageStorage || "Unknown"],
       ["Forms", sessionInfo?.forms || "Unknown"]
     ];
@@ -831,6 +857,7 @@ function renderSessionStatus() {
 }
 
 function renderStats() {
+  $("#statBookings").textContent = bookings.length;
   $("#statTournaments").textContent = data.tournaments.length;
   $("#statImages").textContent = data.images.length;
   $("#statSocials").textContent = data.socials.length;
@@ -878,6 +905,7 @@ function renderQuickPreview() {
   const container = $("#quickPreview");
   clearElement(container);
   [
+    { label: "Bookings", labelClass: "red", title: `${bookings.filter((item) => item.status === "new").length} new requests`, meta: `${bookings.length} total` },
     { label: "Next", labelClass: "red", title: nextTournament?.name || "No tournaments", meta: nextTournament?.date || "Add a date" },
     { label: "Gallery", labelClass: "", title: `${data.images.length} managed images`, meta: "" },
     { label: "Social", labelClass: "", title: `${visibleSocials} visible social links`, meta: "" }
@@ -889,6 +917,129 @@ function renderQuickPreview() {
     if (item.meta) appendTextElement(preview, "p", item.meta, "item-meta");
     container.appendChild(preview);
   });
+}
+
+function renderBookings() {
+  const container = $("#bookingList");
+  if (!container) return;
+  const query = $("#bookingSearch")?.value.toLowerCase().trim() || "";
+  const status = $("#bookingStatusFilter")?.value || "all";
+  const items = bookings.filter((booking) => {
+    const matchesStatus = status === "all" || booking.status === status;
+    const searchable = [
+      booking.reference, booking.fullname, booking.email, booking.phone,
+      booking.booking_type, booking.booking_date, booking.booking_date_label,
+      booking.time_slot, booking.tournament_name, booking.team_name, booking.notes
+    ].join(" ").toLowerCase();
+    return matchesStatus && searchable.includes(query);
+  });
+
+  clearElement(container);
+  if (!items.length) {
+    appendEmptyState(container, bookings.length ? "No bookings match those filters." : "No booking requests yet.");
+    return;
+  }
+
+  items.forEach((booking) => {
+    const article = document.createElement("article");
+    article.className = "booking-card";
+
+    const head = document.createElement("div");
+    head.className = "booking-head";
+    const heading = document.createElement("div");
+    appendTextElement(heading, "span", booking.reference || "No reference", "booking-reference");
+    appendTextElement(heading, "h3", booking.fullname || "Unnamed booking");
+    const pills = document.createElement("div");
+    pills.className = "item-meta";
+    appendPill(pills, booking.status || "new", booking.status === "new" ? "red" : "");
+    appendPill(pills, `Form ${booking.delivery_status || "unknown"}`, booking.delivery_status === "failed" ? "red" : "");
+    heading.appendChild(pills);
+    appendTextElement(head, "time", formatAuditTime(booking.created_at), "booking-time");
+    head.prepend(heading);
+
+    const details = document.createElement("dl");
+    details.className = "booking-details";
+    [
+      ["Phone", booking.phone || "Not provided"],
+      ["Email", booking.email || "Not provided"],
+      ["Booking", booking.booking_type || booking.form_type || "Request"],
+      ["Date", booking.booking_date_label || formatDate(booking.booking_date)],
+      ["Preferred slot", booking.time_slot || "Not provided"],
+      ["Tournament", booking.tournament_name || "Not applicable"],
+      ["Team", booking.team_name || "Not provided"]
+    ].forEach(([label, value]) => {
+      const group = document.createElement("div");
+      appendTextElement(group, "dt", label);
+      appendTextElement(group, "dd", value);
+      details.appendChild(group);
+    });
+
+    if (booking.notes) {
+      const notes = document.createElement("div");
+      notes.className = "booking-notes";
+      appendTextElement(notes, "strong", "Customer note");
+      appendTextElement(notes, "p", booking.notes);
+      article.append(head, details, notes);
+    } else {
+      article.append(head, details);
+    }
+
+    const controls = document.createElement("div");
+    controls.className = "booking-controls";
+    const statusLabel = document.createElement("label");
+    statusLabel.append("Status");
+    const statusSelect = document.createElement("select");
+    ["new", "contacted", "confirmed", "declined", "completed", "cancelled"].forEach((value) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = value[0].toUpperCase() + value.slice(1);
+      option.selected = value === booking.status;
+      statusSelect.appendChild(option);
+    });
+    statusLabel.appendChild(statusSelect);
+
+    const noteLabel = document.createElement("label");
+    noteLabel.append("Internal note");
+    const note = document.createElement("textarea");
+    note.rows = 3;
+    note.maxLength = 2000;
+    note.placeholder = "Follow-up details for the HCC team";
+    note.value = booking.admin_note || "";
+    noteLabel.appendChild(note);
+
+    const save = document.createElement("button");
+    save.className = "btn btn-primary";
+    save.type = "button";
+    save.textContent = "Save update";
+    save.addEventListener("click", () => updateBookingFromCard(booking.reference, statusSelect.value, note.value, save));
+    controls.append(statusLabel, noteLabel, save);
+    article.appendChild(controls);
+    container.appendChild(article);
+  });
+}
+
+async function updateBookingFromCard(reference, status, adminNote, button) {
+  if (!reference) return;
+  button.disabled = true;
+  button.textContent = "Saving…";
+  try {
+    const response = await fetch(`${API_BOOKINGS_URL}/${encodeURIComponent(reference)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status, admin_note: adminNote })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || "Booking update failed.");
+    const index = bookings.findIndex((item) => item.reference === reference);
+    if (index >= 0) bookings[index] = result;
+    await loadAuditEntries();
+    renderAll();
+    toast(`${reference} updated.`);
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = "Save update";
+    toast(error.message || "Booking update failed.");
+  }
 }
 
 function renderTournaments() {

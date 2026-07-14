@@ -8,6 +8,7 @@ const ROOT = path.resolve(__dirname);
 const DATA_DIR = path.join(ROOT, "data");
 const CONTENT_FILE = path.join(DATA_DIR, "content.json");
 const AUDIT_FILE = path.join(DATA_DIR, "audit.json");
+const BOOKINGS_FILE = path.join(DATA_DIR, "bookings.json");
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const ADMIN_USER = process.env.ADMIN_USER || "admin";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
@@ -18,6 +19,7 @@ const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const SUPABASE_CONTENT_TABLE = process.env.SUPABASE_CONTENT_TABLE || "hcc_site_content";
 const SUPABASE_AUDIT_TABLE = process.env.SUPABASE_AUDIT_TABLE || "hcc_admin_audit";
+const SUPABASE_BOOKINGS_TABLE = process.env.SUPABASE_BOOKINGS_TABLE || "hcc_bookings";
 const CONTENT_RECORD_ID = process.env.CONTENT_RECORD_ID || "main";
 const SUPABASE_AUTH_ENABLED = process.env.SUPABASE_AUTH_ENABLED === "true";
 const ALLOW_LOCAL_ADMIN = process.env.ALLOW_LOCAL_ADMIN === "true";
@@ -36,6 +38,13 @@ const SESSION_TTL_MS = Math.max(1, Number(process.env.ADMIN_SESSION_HOURS || 8))
 const MAX_JSON_BYTES = 30 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const rateLimits = new Map();
+
+class ValidationError extends Error {
+  constructor(message) {
+    super(message);
+    this.statusCode = 400;
+  }
+}
 
 function parseOrigin(value) {
   try {
@@ -259,6 +268,24 @@ function ensureContentFile() {
   }
 }
 
+function readLocalBookings() {
+  ensureContentFile();
+  if (!fs.existsSync(BOOKINGS_FILE)) fs.writeFileSync(BOOKINGS_FILE, "[]");
+  try {
+    const rows = JSON.parse(fs.readFileSync(BOOKINGS_FILE, "utf8"));
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalBookings(rows) {
+  ensureContentFile();
+  const normalized = Array.isArray(rows) ? rows.slice(0, 5000) : [];
+  fs.writeFileSync(BOOKINGS_FILE, JSON.stringify(normalized, null, 2));
+  return normalized;
+}
+
 function readLocalContent() {
   ensureContentFile();
   return JSON.parse(fs.readFileSync(CONTENT_FILE, "utf8"));
@@ -321,6 +348,81 @@ async function readContent() {
 
 async function writeContent(content) {
   return hasSupabaseConfig() ? writeSupabaseContent(content) : writeLocalContent(content);
+}
+
+function createBookingReference(now = new Date()) {
+  const date = now.toISOString().slice(0, 10).replace(/-/g, "");
+  return `HCC-${date}-${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
+}
+
+async function readBookings() {
+  if (!hasSupabaseConfig()) return readLocalBookings();
+  const rows = await supabaseRequest(`${SUPABASE_BOOKINGS_TABLE}?select=*&order=created_at.desc&limit=500`);
+  return Array.isArray(rows) ? rows : [];
+}
+
+async function createBooking(payload) {
+  const now = new Date().toISOString();
+  const booking = {
+    reference: createBookingReference(),
+    created_at: now,
+    updated_at: now,
+    status: "new",
+    delivery_status: "pending",
+    form_type: payload.form_type || "Booking Request",
+    fullname: payload.fullname || payload.captain_name || "",
+    email: payload.email || "",
+    phone: payload.phone || "",
+    booking_type: payload.booking_type || "",
+    booking_date: payload.booking_date || "",
+    booking_date_label: payload.booking_date_label || "",
+    time_slot: payload.time_slot || "",
+    tournament_name: payload.tournament_name || "",
+    team_name: payload.team_name || "",
+    notes: payload.notes || "",
+    admin_note: ""
+  };
+
+  if (hasSupabaseConfig()) {
+    const rows = await supabaseRequest(SUPABASE_BOOKINGS_TABLE, {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(booking)
+    });
+    return Array.isArray(rows) && rows[0] ? rows[0] : booking;
+  }
+  writeLocalBookings([booking, ...readLocalBookings()]);
+  return booking;
+}
+
+async function updateBooking(reference, changes) {
+  const allowedStatuses = new Set(["new", "contacted", "confirmed", "declined", "completed", "cancelled"]);
+  const patch = { updated_at: new Date().toISOString() };
+  if (changes.status !== undefined) {
+    if (!allowedStatuses.has(changes.status)) throw new Error("Invalid booking status.");
+    patch.status = changes.status;
+  }
+  if (changes.delivery_status !== undefined) {
+    if (!new Set(["pending", "sent", "failed"]).has(changes.delivery_status)) throw new Error("Invalid delivery status.");
+    patch.delivery_status = changes.delivery_status;
+  }
+  if (changes.admin_note !== undefined) patch.admin_note = String(changes.admin_note || "").trim().slice(0, 2000);
+
+  if (hasSupabaseConfig()) {
+    const rows = await supabaseRequest(`${SUPABASE_BOOKINGS_TABLE}?reference=eq.${encodeURIComponent(reference)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(patch)
+    });
+    if (!Array.isArray(rows) || !rows[0]) throw new Error("Booking not found.");
+    return rows[0];
+  }
+  const rows = readLocalBookings();
+  const index = rows.findIndex((item) => item.reference === reference);
+  if (index < 0) throw new Error("Booking not found.");
+  rows[index] = { ...rows[index], ...patch };
+  writeLocalBookings(rows);
+  return rows[index];
 }
 
 function readLocalAudit() {
@@ -509,32 +611,45 @@ async function forwardFormSubmission(payload) {
     throw new Error("Form endpoint is not configured.");
   }
 
-  const response = await fetch(FORMSPREE_ENDPOINT, {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(normalized.payload)
-  });
+  const booking = await createBooking(normalized.payload);
+  const formPayload = {
+    ...normalized.payload,
+    booking_reference: booking.reference,
+    notes: [`Booking reference: ${booking.reference}`, normalized.payload.notes].filter(Boolean).join("\n")
+  };
 
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(result.error || result.message || "Form submission failed.");
+  try {
+    const response = await fetch(FORMSPREE_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(formPayload)
+    });
+
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(result.error || result.message || "Form submission failed.");
+    }
+    await updateBooking(booking.reference, { delivery_status: "sent" });
+    return { ok: true, reference: booking.reference };
+  } catch (error) {
+    await updateBooking(booking.reference, { delivery_status: "failed" }).catch(() => {});
+    throw error;
   }
-  return { ok: true };
 }
 
 function normalizeFormSubmission(payload) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    throw new Error("Invalid form submission.");
+    throw new ValidationError("Invalid form submission.");
   }
   if (String(payload.website || "").trim()) return { spam: true, payload: {} };
 
   const allowedFields = new Set([
     "form_type", "fullname", "phone", "email", "booking_type", "booking_date",
     "time_slot", "notes", "tournament_name", "team_name", "captain_name",
-    "squad_size", "tournament_selection"
+    "squad_size", "tournament_selection", "booking_date_label", "client_reference"
   ]);
   const cleanPayload = {};
   for (const [key, value] of Object.entries(payload)) {
@@ -543,14 +658,27 @@ function normalizeFormSubmission(payload) {
     cleanPayload[key] = String(value ?? "").trim().slice(0, limit);
   }
 
+  if (!new Set(["Slot Booking", "Tournament Registration"]).has(cleanPayload.form_type)) {
+    throw new ValidationError("Unsupported form type.");
+  }
   if (!cleanPayload.form_type || !cleanPayload.phone) {
-    throw new Error("Required form details are missing.");
+    throw new ValidationError("Required form details are missing.");
+  }
+  const phoneDigits = cleanPayload.phone.replace(/\D/g, "");
+  if (!/^\+?[\d\s().-]+$/.test(cleanPayload.phone) || phoneDigits.length < 7 || phoneDigits.length > 15) {
+    throw new ValidationError("Enter a valid phone number.");
+  }
+  if (cleanPayload.email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(cleanPayload.email)) {
+    throw new ValidationError("Enter a valid email address.");
   }
   if (cleanPayload.form_type === "Slot Booking" && (!cleanPayload.fullname || !cleanPayload.booking_date)) {
-    throw new Error("Required booking details are missing.");
+    throw new ValidationError("Required booking details are missing.");
+  }
+  if (cleanPayload.booking_date && !/^\d{4}-\d{2}-\d{2}$/.test(cleanPayload.booking_date)) {
+    throw new ValidationError("Enter a valid booking date.");
   }
   if (cleanPayload.form_type === "Tournament Registration" && (!cleanPayload.team_name || !cleanPayload.captain_name)) {
-    throw new Error("Required tournament details are missing.");
+    throw new ValidationError("Required tournament details are missing.");
   }
   return { spam: false, payload: cleanPayload };
 }
@@ -782,6 +910,7 @@ function requiresAdminAuth(request) {
   if (pathname === "/api/cloudinary/delete") return true;
   if (pathname === "/api/session") return true;
   if (pathname === "/api/audit") return true;
+  if (pathname === "/api/bookings" || pathname.startsWith("/api/bookings/")) return true;
   if (pathname === "/api/password-reset") return true;
   if (pathname === "/api/password-update") return true;
   return pathname === "/admin" ||
@@ -803,13 +932,15 @@ function isSameOriginWrite(request) {
   }
 }
 
-function readBody(request) {
+function readBody(request, maxBytes = MAX_JSON_BYTES) {
   return new Promise((resolve, reject) => {
     let body = "";
     request.on("data", (chunk) => {
       body += chunk;
-      if (body.length > MAX_JSON_BYTES) {
-        reject(new Error("Request body too large"));
+      if (body.length > maxBytes) {
+        const error = new Error("Request body too large");
+        error.statusCode = 413;
+        reject(error);
         request.destroy();
       }
     });
@@ -1330,14 +1461,14 @@ function sendLegalPage(response, type) {
     <div class="card">
       <span class="eyebrow">Hamriyah Cricket Centre</span>
       <h1>${title}</h1>
-      <p>Effective Date: [Insert Date]</p>
+      <p>Effective Date: 13 July 2026</p>
       ${sections.map((section) => `
         <section>
           <h2>${section.heading}</h2>
           ${section.paragraphs.map((paragraph) => `<p>${paragraph}</p>`).join("")}
         </section>
       `).join("")}
-      <p class="updated">Last updated: [Insert Date]</p>
+      <p class="updated">Last updated: 13 July 2026</p>
     </div>
   </main>
 </body>
@@ -1362,6 +1493,7 @@ const server = http.createServer(async (request, response) => {
       sendJson(response, 200, {
         ok: true,
         contentStorage: hasSupabaseConfig() ? "supabase" : "local-json",
+        bookingStorage: hasSupabaseConfig() ? "supabase" : "local-json",
         imageStorage: hasCloudinaryConfig() ? "cloudinary" : "local-data",
         auth: authMode(),
         localAdmin: localAdminEnabled() ? "enabled" : "disabled",
@@ -1453,6 +1585,7 @@ const server = http.createServer(async (request, response) => {
         identity: session?.identity || ADMIN_USER,
         provider: session?.provider || "basic",
         contentStorage: hasSupabaseConfig() ? "supabase" : "local-json",
+        bookingStorage: hasSupabaseConfig() ? "supabase" : "local-json",
         imageStorage: hasCloudinaryConfig() ? "cloudinary" : "local-data",
         auth: authMode(),
         forms: FORMSPREE_ENDPOINT ? "configured" : "missing"
@@ -1469,6 +1602,28 @@ const server = http.createServer(async (request, response) => {
       clearAuditLog();
       await logAudit(request, "audit.clear");
       sendJson(response, 200, { ok: true });
+      return;
+    }
+
+    if (parsed.pathname === "/api/bookings" && request.method === "GET") {
+      sendJson(response, 200, { bookings: await readBookings() });
+      return;
+    }
+
+    if (parsed.pathname.startsWith("/api/bookings/") && request.method === "PATCH") {
+      if (!checkRateLimit(request, "booking-update", 120, 60 * 1000)) {
+        sendJson(response, 429, { error: "Too many booking updates" });
+        return;
+      }
+      const reference = decodeURIComponent(parsed.pathname.slice("/api/bookings/".length));
+      if (!/^HCC-\d{8}-[A-Z0-9]{6,12}$/.test(reference)) {
+        sendJson(response, 400, { error: "Invalid booking reference" });
+        return;
+      }
+      const changes = JSON.parse(await readBody(request));
+      const booking = await updateBooking(reference, changes);
+      await logAudit(request, "booking.update", { reference, status: booking.status });
+      sendJson(response, 200, booking);
       return;
     }
 
@@ -1561,14 +1716,17 @@ const server = http.createServer(async (request, response) => {
         sendJson(response, 429, { error: "Too many form submissions" });
         return;
       }
-      const payload = JSON.parse(await readBody(request));
+      const payload = JSON.parse(await readBody(request, 32 * 1024));
       sendJson(response, 200, await forwardFormSubmission(payload));
       return;
     }
 
     serveFile(request.url, response);
   } catch (error) {
-    sendJson(response, 500, { error: error.message || "Server error" });
+    const status = Number.isInteger(error.statusCode) ? error.statusCode : 500;
+    if (status >= 500) console.error(error);
+    const message = status >= 500 && IS_PRODUCTION ? "The service is temporarily unavailable." : (error.message || "Server error");
+    sendJson(response, status, { error: message });
   }
 });
 

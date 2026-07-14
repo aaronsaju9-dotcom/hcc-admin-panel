@@ -294,7 +294,7 @@ video {
 
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 16px;
   margin: 22px 0;
 }
@@ -559,6 +559,138 @@ video {
 .list-panel {
   padding: 18px;
   min-height: 260px;
+}
+
+.booking-toolbar {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(180px, 260px);
+  gap: 14px;
+  margin-bottom: 18px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.booking-toolbar label,
+.booking-controls label {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+
+.booking-toolbar select,
+.booking-controls select,
+.booking-controls textarea {
+  width: 100%;
+  padding: 12px 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: #fffdf8;
+  outline: none;
+}
+
+.booking-toolbar select:focus,
+.booking-controls select:focus,
+.booking-controls textarea:focus {
+  border-color: rgba(200, 16, 30, 0.45);
+  box-shadow: 0 0 0 3px rgba(200, 16, 30, 0.08);
+}
+
+.booking-list {
+  display: grid;
+  gap: 16px;
+}
+
+.booking-card {
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fffdf7;
+}
+
+.booking-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.booking-head h3 {
+  margin: 4px 0 0;
+  font-size: 1.25rem;
+}
+
+.booking-reference {
+  color: var(--red);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+}
+
+.booking-time {
+  color: var(--muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.booking-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px;
+  margin: 18px 0;
+}
+
+.booking-details div {
+  padding: 12px;
+  border-radius: 7px;
+  background: var(--soft);
+}
+
+.booking-details dt {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.booking-details dd {
+  margin: 6px 0 0;
+  color: var(--ink);
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.booking-notes {
+  margin-bottom: 18px;
+  padding: 14px;
+  border-left: 3px solid var(--red);
+  background: rgba(200, 16, 30, 0.04);
+}
+
+.booking-notes p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.booking-controls {
+  display: grid;
+  grid-template-columns: minmax(150px, 220px) minmax(260px, 1fr) auto;
+  gap: 14px;
+  align-items: end;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.booking-controls textarea {
+  resize: vertical;
 }
 
 .item-card {
@@ -827,6 +959,15 @@ video {
   .status-row {
     display: grid;
     gap: 4px;
+  }
+
+  .booking-toolbar,
+  .booking-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .booking-head {
+    display: grid;
   }
 
   .status-row strong {

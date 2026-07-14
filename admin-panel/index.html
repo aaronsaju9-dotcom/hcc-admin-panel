@@ -21,24 +21,28 @@
         <span class="nav-icon">01</span>
         <span>Dashboard</span>
       </button>
-      <button class="nav-item" type="button" data-section-link="tournaments">
+      <button class="nav-item" type="button" data-section-link="bookings">
         <span class="nav-icon">02</span>
+        <span>Bookings</span>
+      </button>
+      <button class="nav-item" type="button" data-section-link="tournaments">
+        <span class="nav-icon">03</span>
         <span>Tournaments</span>
       </button>
       <button class="nav-item" type="button" data-section-link="images">
-        <span class="nav-icon">03</span>
+        <span class="nav-icon">04</span>
         <span>Images</span>
       </button>
       <button class="nav-item" type="button" data-section-link="socials">
-        <span class="nav-icon">04</span>
+        <span class="nav-icon">05</span>
         <span>Socials</span>
       </button>
       <button class="nav-item" type="button" data-section-link="testimonials">
-        <span class="nav-icon">05</span>
+        <span class="nav-icon">06</span>
         <span>Testimonials</span>
       </button>
       <button class="nav-item" type="button" data-section-link="settings">
-        <span class="nav-icon">06</span>
+        <span class="nav-icon">07</span>
         <span>Settings</span>
       </button>
     </nav>
@@ -70,8 +74,8 @@
       <div class="hero-panel">
         <div>
           <span class="eyebrow">Content control</span>
-          <h2>Edit the HCC website content from one panel.</h2>
-          <p>Manage tournaments, gallery images, social links, and testimonials. Every save writes to the shared website content file.</p>
+          <h2>Control the HCC website and mobile app from one panel.</h2>
+          <p>Manage shared tournaments, gallery images, social links, testimonials, and app booking requests from one secure place.</p>
         </div>
         <div class="hero-media">
           <video src="hero-cricket.mp4" autoplay muted loop playsinline preload="metadata" poster="hero-bg-cricket.webp"></video>
@@ -79,6 +83,10 @@
       </div>
 
       <div class="stat-grid">
+        <article class="stat">
+          <span>Bookings</span>
+          <strong id="statBookings">0</strong>
+        </article>
         <article class="stat">
           <span>Tournaments</span>
           <strong id="statTournaments">0</strong>
@@ -118,6 +126,37 @@
           </div>
           <div class="preview-stack" id="quickPreview"></div>
         </section>
+      </div>
+    </section>
+
+    <section class="panel-section" id="bookings" data-title="Bookings">
+      <div class="section-tools">
+        <div>
+          <span class="eyebrow">Website and app enquiries</span>
+          <h2>Bookings</h2>
+        </div>
+        <button class="btn btn-primary" type="button" id="refreshBookingsBtn">Refresh bookings</button>
+      </div>
+
+      <div class="booking-toolbar" aria-label="Booking filters">
+        <label>Search
+          <input class="search-input" id="bookingSearch" type="search" placeholder="Name, phone, reference, date or slot">
+        </label>
+        <label>Status
+          <select id="bookingStatusFilter">
+            <option value="all">All statuses</option>
+            <option value="new">New</option>
+            <option value="contacted">Contacted</option>
+            <option value="confirmed">Confirmed</option>
+            <option value="declined">Declined</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="list-panel">
+        <div class="booking-list" id="bookingList"></div>
       </div>
     </section>
 
@@ -415,6 +454,7 @@
           </div>
           <div class="handover-list">
             <p><strong>Before big edits:</strong> export a backup JSON.</p>
+            <p><strong>Bookings:</strong> update each request status and add internal follow-up notes. Notes never appear in the app.</p>
             <p><strong>Tournaments:</strong> keep dates, registration status, poster, and publish state updated.</p>
             <p><strong>Images:</strong> upload clear landscape photos under 8 MB and write useful alt text.</p>
             <p><strong>Socials:</strong> only publish links that are active and client-owned.</p>
