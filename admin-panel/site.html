@@ -555,6 +555,19 @@
     height: 1px;
     overflow: hidden;
   }
+  .form-inline-error {
+    display: flex; align-items: flex-start; gap: 11px;
+    margin-bottom: 22px; padding: 14px 16px;
+    border: 1px solid #f1b45d; border-radius: 6px;
+    background: #fff4e5; color: #8a4300;
+    font-size: 0.92rem; font-weight: 600; line-height: 1.5;
+  }
+  .form-inline-error[hidden] { display: none; }
+  .form-inline-error::before {
+    content: '!'; flex: 0 0 22px; width: 22px; height: 22px;
+    display: grid; place-items: center; border-radius: 50%;
+    background: #d97706; color: #fff; font-weight: 800;
+  }
   .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
   .form-group { display: flex; flex-direction: column; gap: 8px; }
   .form-group.full { grid-column: span 2; }
@@ -568,6 +581,9 @@
   }
   .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
     border-color: var(--red); box-shadow: 0 0 0 3px rgba(200,16,30,0.08);
+  }
+  .form-group input.form-field-error, .form-group select.form-field-error, .form-group textarea.form-field-error {
+    border-color: #d97706; box-shadow: 0 0 0 3px rgba(217,119,6,0.12);
   }
   .form-group textarea { resize: vertical; min-height: 120px; }
   .form-submit { margin-top: 32px; text-align: center; }
@@ -3160,11 +3176,13 @@
       <form class="booking-form reveal delay-3"
         action="/api/form-submit"
         method="POST"
+        novalidate
         id="slot-booking-form">
         <input type="hidden" name="form_type" value="Slot Booking">
         <div class="form-honeypot" aria-hidden="true">
           <label>Website<input type="text" name="website" tabindex="-1" autocomplete="off"></label>
         </div>
+        <div class="form-inline-error" role="alert" aria-live="assertive" hidden></div>
         <div class="form-grid">
           <div class="form-group">
             <label>Full Name</label>
@@ -3216,6 +3234,7 @@
       <form class="booking-form reveal delay-3"
         action="/api/form-submit"
         method="POST"
+        novalidate
         id="tournament-booking-form">
         <input type="hidden" name="form_type" value="Tournament Registration">
         <input type="hidden" name="tournament_name" id="tournament-name-hidden" value="">
@@ -3226,6 +3245,7 @@
           <span class="banner-label">Registering for</span>
           <div class="banner-name" id="tournament-banner-name">—</div>
         </div>
+        <div class="form-inline-error" role="alert" aria-live="assertive" hidden></div>
         <div class="form-grid">
           <div class="form-group">
             <label>Team Name</label>
@@ -4461,14 +4481,72 @@ function showToast(msg) {
   setTimeout(() => toast.classList.remove('show'), 4500);
 }
 
+function clearFormError(form) {
+  const errorBox = form.querySelector('.form-inline-error');
+  if (errorBox) {
+    errorBox.textContent = '';
+    errorBox.hidden = true;
+  }
+  form.querySelectorAll('.form-field-error').forEach(field => {
+    field.classList.remove('form-field-error');
+    field.removeAttribute('aria-invalid');
+  });
+}
+
+function showFormError(form, message, fieldName) {
+  clearFormError(form);
+  const errorBox = form.querySelector('.form-inline-error');
+  if (errorBox) {
+    errorBox.textContent = message;
+    errorBox.hidden = false;
+  }
+  const field = fieldName ? form.elements.namedItem(fieldName) : null;
+  if (field && typeof field.focus === 'function') {
+    field.classList.add('form-field-error');
+    field.setAttribute('aria-invalid', 'true');
+    field.focus();
+  }
+}
+
+function validateBookingForm(data) {
+  const email = String(data.email || '').trim();
+  const phone = String(data.phone || '').trim();
+  const phoneDigits = phone.replace(/\D/g, '');
+  if (data.form_type === 'Slot Booking' && String(data.fullname || '').trim().length < 2) {
+    return { message: 'Please enter your full name.', field: 'fullname' };
+  }
+  if (data.form_type === 'Tournament Registration' && String(data.team_name || '').trim().length < 2) {
+    return { message: 'Please enter your team name.', field: 'team_name' };
+  }
+  if (data.form_type === 'Tournament Registration' && String(data.captain_name || '').trim().length < 2) {
+    return { message: 'Please enter the captain name.', field: 'captain_name' };
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+    return { message: 'Please enter a valid email address.', field: 'email' };
+  }
+  if (!/^\+?[\d\s().-]+$/.test(phone) || phoneDigits.length < 7 || phoneDigits.length > 15) {
+    return { message: 'Please enter a valid phone number using numbers only. You may also use +, spaces, brackets, dots or hyphens.', field: 'phone' };
+  }
+  if (data.form_type === 'Slot Booking' && !/^\d{4}-\d{2}-\d{2}$/.test(String(data.booking_date || ''))) {
+    return { message: 'Please select a booking date.', field: 'booking_date' };
+  }
+  return null;
+}
+
 async function handleFormSubmit(form, e) {
   e.preventDefault();
+  const data = Object.fromEntries(new FormData(form).entries());
+  const validationError = validateBookingForm(data);
+  if (validationError) {
+    showFormError(form, validationError.message, validationError.field);
+    return;
+  }
+  clearFormError(form);
   const btn = form.querySelector('[type="submit"]');
   const originalText = btn.textContent;
   btn.textContent = 'Sending...';
   btn.disabled = true;
   try {
-    const data = Object.fromEntries(new FormData(form).entries());
     const response = await fetch(form.action, {
       method: 'POST',
       body: JSON.stringify(data),
@@ -4483,13 +4561,14 @@ async function handleFormSubmit(form, e) {
       if (result.reference) confirmMsg += ' Reference: ' + result.reference + '.';
       if (result.deliveryStatus === 'failed') confirmMsg += ' Your request is saved; staff email delivery is delayed.';
       showToast(confirmMsg);
+      clearFormError(form);
       form.reset();
       if (_tournamentsCache) populateTournamentSelect(_tournamentsCache);
     } else {
-      showToast('❌ ' + (result.error || 'We could not save the request. Please check your details and try again.'));
+      showFormError(form, result.error || 'We could not save the request. Please check your details and try again.');
     }
   } catch {
-    showToast('❌ Network error. Please contact us directly.');
+    showFormError(form, 'Network error. Please check your connection and try again.');
   } finally {
     btn.textContent = originalText;
     btn.disabled = false;
@@ -4703,8 +4782,21 @@ const statsSection = document.querySelector('.about-stats');
 if (statsSection) counterObs.observe(statsSection);
 
 /* ─── FORM EVENT LISTENERS ─── */
-document.getElementById('slot-booking-form').addEventListener('submit', (e) => handleFormSubmit(e.target, e));
-document.getElementById('tournament-booking-form').addEventListener('submit', (e) => handleFormSubmit(e.target, e));
+['slot-booking-form', 'tournament-booking-form'].forEach(formId => {
+  const form = document.getElementById(formId);
+  form.addEventListener('submit', (event) => handleFormSubmit(form, event));
+  form.addEventListener('input', (event) => {
+    const field = event.target;
+    if (!field.classList || !field.classList.contains('form-field-error')) return;
+    field.classList.remove('form-field-error');
+    field.removeAttribute('aria-invalid');
+    const errorBox = form.querySelector('.form-inline-error');
+    if (errorBox) {
+      errorBox.textContent = '';
+      errorBox.hidden = true;
+    }
+  });
+});
 document.getElementById('booking-status-form').addEventListener('submit', async function (event) {
   event.preventDefault();
   const button = this.querySelector('[type="submit"]');
