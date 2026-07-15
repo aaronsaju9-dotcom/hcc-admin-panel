@@ -357,7 +357,7 @@ function createBookingReference(now = new Date()) {
 
 async function readBookings() {
   if (!hasSupabaseConfig()) return readLocalBookings();
-  const rows = await supabaseRequest(`${SUPABASE_BOOKINGS_TABLE}?select=*&order=created_at.desc&limit=500`);
+  const rows = await supabaseRequest(`${SUPABASE_BOOKINGS_TABLE}?select=*&order=created_at.desc&limit=1000`);
   return Array.isArray(rows) ? rows : [];
 }
 

@@ -135,8 +135,13 @@
           <span class="eyebrow">Website and app enquiries</span>
           <h2>Bookings</h2>
         </div>
-        <button class="btn btn-primary" type="button" id="refreshBookingsBtn">Refresh bookings</button>
+        <div class="tool-row">
+          <button class="btn btn-soft" type="button" id="exportBookingsBtn">Export CSV</button>
+          <button class="btn btn-primary" type="button" id="refreshBookingsBtn">Refresh bookings</button>
+        </div>
       </div>
+
+      <div class="booking-summary" id="bookingSummary" aria-label="Booking status summary"></div>
 
       <div class="booking-toolbar" aria-label="Booking filters">
         <label>Search
@@ -153,10 +158,39 @@
             <option value="cancelled">Cancelled</option>
           </select>
         </label>
+        <label>Received
+          <select id="bookingPeriodFilter">
+            <option value="all">Any time</option>
+            <option value="today">Today</option>
+            <option value="7">Last 7 days</option>
+            <option value="30">Last 30 days</option>
+            <option value="90">Last 90 days</option>
+          </select>
+        </label>
+        <label>Sort
+          <select id="bookingSort">
+            <option value="newest">Newest received</option>
+            <option value="oldest">Oldest received</option>
+            <option value="booking-date">Requested date</option>
+            <option value="name">Customer name</option>
+          </select>
+        </label>
+        <label>Per page
+          <select id="bookingPageSize">
+            <option value="20">20</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+        </label>
       </div>
 
       <div class="list-panel">
+        <div class="booking-results-bar">
+          <div><strong id="bookingResultsCount">0 bookings</strong><span>Open a booking to view details or update its status.</span></div>
+          <button class="icon-btn" type="button" id="resetBookingFiltersBtn">Clear filters</button>
+        </div>
         <div class="booking-list" id="bookingList"></div>
+        <div class="booking-pagination" id="bookingPagination" aria-label="Booking pages"></div>
       </div>
     </section>
 

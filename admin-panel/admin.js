@@ -93,6 +93,8 @@ let data = structuredClone(defaultData);
 let activity = loadActivity();
 let auditEntries = [];
 let bookings = [];
+let bookingPage = 1;
+const expandedBookingReferences = new Set();
 let sessionInfo = null;
 let cachedUploads = {
   tournamentPoster: null,
@@ -288,10 +290,25 @@ function bindToolbar() {
   });
 
   $("#tournamentSearch").addEventListener("input", renderTournaments);
-  $("#bookingSearch")?.addEventListener("input", renderBookings);
-  $("#bookingStatusFilter")?.addEventListener("change", renderBookings);
+  ["#bookingSearch", "#bookingStatusFilter", "#bookingPeriodFilter", "#bookingSort", "#bookingPageSize"].forEach((selector) => {
+    const eventName = selector === "#bookingSearch" ? "input" : "change";
+    $(selector)?.addEventListener(eventName, () => {
+      bookingPage = 1;
+      renderBookings();
+    });
+  });
+  $("#exportBookingsBtn")?.addEventListener("click", exportBookingsCsv);
+  $("#resetBookingFiltersBtn")?.addEventListener("click", () => {
+    $("#bookingSearch").value = "";
+    $("#bookingStatusFilter").value = "all";
+    $("#bookingPeriodFilter").value = "all";
+    $("#bookingSort").value = "newest";
+    bookingPage = 1;
+    renderBookings();
+  });
   $("#refreshBookingsBtn")?.addEventListener("click", async () => {
     await loadBookings({ notify: true });
+    bookingPage = 1;
     renderBookings();
     renderStats();
     renderQuickPreview();
@@ -919,30 +936,130 @@ function renderQuickPreview() {
   });
 }
 
-function renderBookings() {
-  const container = $("#bookingList");
-  if (!container) return;
+function receivedWithinPeriod(value, period) {
+  if (period === "all") return true;
+  const timestamp = new Date(value || 0).getTime();
+  if (!Number.isFinite(timestamp)) return false;
+  if (period === "today") {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    return timestamp >= start.getTime();
+  }
+  return timestamp >= Date.now() - Number(period) * 24 * 60 * 60 * 1000;
+}
+
+function getFilteredBookings() {
   const query = $("#bookingSearch")?.value.toLowerCase().trim() || "";
   const status = $("#bookingStatusFilter")?.value || "all";
+  const period = $("#bookingPeriodFilter")?.value || "all";
+  const sort = $("#bookingSort")?.value || "newest";
   const items = bookings.filter((booking) => {
     const matchesStatus = status === "all" || booking.status === status;
     const searchable = [
       booking.reference, booking.fullname, booking.email, booking.phone,
       booking.booking_type, booking.booking_date, booking.booking_date_label,
-      booking.time_slot, booking.tournament_name, booking.team_name, booking.notes
+      booking.time_slot, booking.tournament_name, booking.team_name,
+      booking.notes, booking.admin_note
     ].join(" ").toLowerCase();
-    return matchesStatus && searchable.includes(query);
+    return matchesStatus && receivedWithinPeriod(booking.created_at, period) && searchable.includes(query);
   });
+
+  return items.sort((left, right) => {
+    if (sort === "oldest") return new Date(left.created_at || 0) - new Date(right.created_at || 0);
+    if (sort === "booking-date") {
+      return String(left.booking_date || "9999-12-31").localeCompare(String(right.booking_date || "9999-12-31")) || new Date(right.created_at || 0) - new Date(left.created_at || 0);
+    }
+    if (sort === "name") return String(left.fullname || "").localeCompare(String(right.fullname || ""), undefined, { sensitivity: "base" });
+    return new Date(right.created_at || 0) - new Date(left.created_at || 0);
+  });
+}
+
+function renderBookingSummary() {
+  const container = $("#bookingSummary");
+  if (!container) return;
+  const activeStatus = $("#bookingStatusFilter")?.value || "all";
+  const summaries = [
+    ["all", "All", bookings.length],
+    ["new", "New", bookings.filter((item) => item.status === "new").length],
+    ["contacted", "Contacted", bookings.filter((item) => item.status === "contacted").length],
+    ["confirmed", "Confirmed", bookings.filter((item) => item.status === "confirmed").length],
+    ["completed", "Completed", bookings.filter((item) => item.status === "completed").length]
+  ];
+  clearElement(container);
+  summaries.forEach(([value, label, count]) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `booking-summary-card${activeStatus === value ? " active" : ""}`;
+    button.setAttribute("aria-pressed", String(activeStatus === value));
+    appendTextElement(button, "span", label);
+    appendTextElement(button, "strong", count);
+    button.addEventListener("click", () => {
+      $("#bookingStatusFilter").value = value;
+      bookingPage = 1;
+      renderBookings();
+    });
+    container.appendChild(button);
+  });
+}
+
+function renderBookingPagination(total, pageSize) {
+  const container = $("#bookingPagination");
+  if (!container) return;
+  clearElement(container);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  if (totalPages <= 1) return;
+
+  const previous = document.createElement("button");
+  previous.type = "button";
+  previous.className = "btn btn-soft";
+  previous.textContent = "Previous";
+  previous.disabled = bookingPage <= 1;
+  previous.addEventListener("click", () => {
+    bookingPage -= 1;
+    renderBookings();
+    document.getElementById("bookings").scrollIntoView({ behavior: "smooth" });
+  });
+
+  appendTextElement(container, "span", `Page ${bookingPage} of ${totalPages}`);
+
+  const next = document.createElement("button");
+  next.type = "button";
+  next.className = "btn btn-soft";
+  next.textContent = "Next";
+  next.disabled = bookingPage >= totalPages;
+  next.addEventListener("click", () => {
+    bookingPage += 1;
+    renderBookings();
+    document.getElementById("bookings").scrollIntoView({ behavior: "smooth" });
+  });
+  container.prepend(previous);
+  container.appendChild(next);
+}
+
+function renderBookings() {
+  const container = $("#bookingList");
+  if (!container) return;
+  renderBookingSummary();
+  const filtered = getFilteredBookings();
+  const pageSize = Number($("#bookingPageSize")?.value || 20);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  bookingPage = Math.min(Math.max(1, bookingPage), totalPages);
+  const start = (bookingPage - 1) * pageSize;
+  const items = filtered.slice(start, start + pageSize);
+  const count = $("#bookingResultsCount");
+  if (count) count.textContent = filtered.length ? `Showing ${start + 1}–${start + items.length} of ${filtered.length}` : "0 bookings";
 
   clearElement(container);
   if (!items.length) {
     appendEmptyState(container, bookings.length ? "No bookings match those filters." : "No booking requests yet.");
+    renderBookingPagination(0, pageSize);
     return;
   }
 
   items.forEach((booking) => {
+    const expanded = expandedBookingReferences.has(booking.reference);
     const article = document.createElement("article");
-    article.className = "booking-card";
+    article.className = `booking-card status-${booking.status || "new"}`;
 
     const head = document.createElement("div");
     head.className = "booking-head";
@@ -951,71 +1068,136 @@ function renderBookings() {
     appendTextElement(heading, "h3", booking.fullname || "Unnamed booking");
     const pills = document.createElement("div");
     pills.className = "item-meta";
-    appendPill(pills, booking.status || "new", booking.status === "new" ? "red" : "");
-    appendPill(pills, `Form ${booking.delivery_status || "unknown"}`, booking.delivery_status === "failed" ? "red" : "");
+    appendPill(pills, booking.status || "new", ["new", "declined", "cancelled"].includes(booking.status) ? "red" : "");
+    if (booking.admin_note) appendPill(pills, "Has note");
+    if (booking.delivery_status === "failed") appendPill(pills, "Delivery failed", "red");
     heading.appendChild(pills);
-    appendTextElement(head, "time", formatAuditTime(booking.created_at), "booking-time");
-    head.prepend(heading);
 
-    const details = document.createElement("dl");
-    details.className = "booking-details";
+    const headActions = document.createElement("div");
+    headActions.className = "booking-head-actions";
+    appendTextElement(headActions, "time", formatAuditTime(booking.created_at), "booking-time");
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "icon-btn booking-toggle";
+    toggle.textContent = expanded ? "Close" : "Open";
+    toggle.setAttribute("aria-expanded", String(expanded));
+    toggle.addEventListener("click", () => {
+      if (expanded) expandedBookingReferences.delete(booking.reference);
+      else expandedBookingReferences.add(booking.reference);
+      renderBookings();
+    });
+    headActions.appendChild(toggle);
+    head.append(heading, headActions);
+
+    const compact = document.createElement("div");
+    compact.className = "booking-compact-meta";
     [
-      ["Phone", booking.phone || "Not provided"],
-      ["Email", booking.email || "Not provided"],
-      ["Booking", booking.booking_type || booking.form_type || "Request"],
-      ["Date", booking.booking_date_label || formatDate(booking.booking_date)],
-      ["Preferred slot", booking.time_slot || "Not provided"],
-      ["Tournament", booking.tournament_name || "Not applicable"],
-      ["Team", booking.team_name || "Not provided"]
-    ].forEach(([label, value]) => {
-      const group = document.createElement("div");
-      appendTextElement(group, "dt", label);
-      appendTextElement(group, "dd", value);
-      details.appendChild(group);
-    });
+      booking.phone || "No phone",
+      booking.booking_type || booking.tournament_name || booking.form_type || "Booking request",
+      booking.booking_date_label || formatDate(booking.booking_date),
+      booking.time_slot || "No preferred slot"
+    ].forEach((value) => appendTextElement(compact, "span", value));
+    article.append(head, compact);
 
-    if (booking.notes) {
-      const notes = document.createElement("div");
-      notes.className = "booking-notes";
-      appendTextElement(notes, "strong", "Customer note");
-      appendTextElement(notes, "p", booking.notes);
-      article.append(head, details, notes);
-    } else {
-      article.append(head, details);
+    if (expanded) {
+      const expandedContent = document.createElement("div");
+      expandedContent.className = "booking-expanded";
+      const details = document.createElement("dl");
+      details.className = "booking-details";
+      [
+        ["Phone", booking.phone || "Not provided"],
+        ["Email", booking.email || "Not provided"],
+        ["Booking", booking.booking_type || booking.form_type || "Request"],
+        ["Date", booking.booking_date_label || formatDate(booking.booking_date)],
+        ["Preferred slot", booking.time_slot || "Not provided"],
+        ["Tournament", booking.tournament_name || "Not applicable"],
+        ["Team", booking.team_name || "Not provided"]
+      ].forEach(([label, value]) => {
+        const group = document.createElement("div");
+        appendTextElement(group, "dt", label);
+        appendTextElement(group, "dd", value);
+        details.appendChild(group);
+      });
+      expandedContent.appendChild(details);
+
+      if (booking.notes) {
+        const notes = document.createElement("div");
+        notes.className = "booking-notes";
+        appendTextElement(notes, "strong", "Customer note");
+        appendTextElement(notes, "p", booking.notes);
+        expandedContent.appendChild(notes);
+      }
+
+      const controls = document.createElement("div");
+      controls.className = "booking-controls";
+      const statusLabel = document.createElement("label");
+      statusLabel.append("Status");
+      const statusSelect = document.createElement("select");
+      ["new", "contacted", "confirmed", "declined", "completed", "cancelled"].forEach((value) => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = value[0].toUpperCase() + value.slice(1);
+        option.selected = value === booking.status;
+        statusSelect.appendChild(option);
+      });
+      statusLabel.appendChild(statusSelect);
+
+      const noteLabel = document.createElement("label");
+      noteLabel.append("Internal note");
+      const note = document.createElement("textarea");
+      note.rows = 3;
+      note.maxLength = 2000;
+      note.placeholder = "Follow-up details for the HCC team";
+      note.value = booking.admin_note || "";
+      noteLabel.appendChild(note);
+
+      const save = document.createElement("button");
+      save.className = "btn btn-primary";
+      save.type = "button";
+      save.textContent = "Save update";
+      save.addEventListener("click", () => updateBookingFromCard(booking.reference, statusSelect.value, note.value, save));
+      controls.append(statusLabel, noteLabel, save);
+      expandedContent.appendChild(controls);
+      article.appendChild(expandedContent);
     }
-
-    const controls = document.createElement("div");
-    controls.className = "booking-controls";
-    const statusLabel = document.createElement("label");
-    statusLabel.append("Status");
-    const statusSelect = document.createElement("select");
-    ["new", "contacted", "confirmed", "declined", "completed", "cancelled"].forEach((value) => {
-      const option = document.createElement("option");
-      option.value = value;
-      option.textContent = value[0].toUpperCase() + value.slice(1);
-      option.selected = value === booking.status;
-      statusSelect.appendChild(option);
-    });
-    statusLabel.appendChild(statusSelect);
-
-    const noteLabel = document.createElement("label");
-    noteLabel.append("Internal note");
-    const note = document.createElement("textarea");
-    note.rows = 3;
-    note.maxLength = 2000;
-    note.placeholder = "Follow-up details for the HCC team";
-    note.value = booking.admin_note || "";
-    noteLabel.appendChild(note);
-
-    const save = document.createElement("button");
-    save.className = "btn btn-primary";
-    save.type = "button";
-    save.textContent = "Save update";
-    save.addEventListener("click", () => updateBookingFromCard(booking.reference, statusSelect.value, note.value, save));
-    controls.append(statusLabel, noteLabel, save);
-    article.appendChild(controls);
     container.appendChild(article);
   });
+  renderBookingPagination(filtered.length, pageSize);
+}
+
+function csvCell(value) {
+  let text = String(value ?? "").replaceAll('"', '""');
+  if (/^[=+\-@]/.test(text)) text = `'${text}`;
+  return `"${text}"`;
+}
+
+function exportBookingsCsv() {
+  const items = getFilteredBookings();
+  if (!items.length) {
+    toast("No filtered bookings to export.");
+    return;
+  }
+  const fields = [
+    ["Reference", "reference"], ["Received", "created_at"], ["Status", "status"],
+    ["Name", "fullname"], ["Phone", "phone"], ["Email", "email"],
+    ["Booking type", "booking_type"], ["Requested date", "booking_date"],
+    ["Preferred slot", "time_slot"], ["Tournament", "tournament_name"],
+    ["Team", "team_name"], ["Customer note", "notes"], ["Internal note", "admin_note"]
+  ];
+  const csv = [
+    fields.map(([label]) => csvCell(label)).join(","),
+    ...items.map((booking) => fields.map(([, key]) => csvCell(booking[key])).join(","))
+  ].join("\r\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `hcc-bookings-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  toast(`Exported ${items.length} bookings.`);
 }
 
 async function updateBookingFromCard(reference, status, adminNote, button) {
