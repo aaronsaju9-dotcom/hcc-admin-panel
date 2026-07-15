@@ -661,14 +661,14 @@ function normalizeFormSubmission(payload) {
   if (!new Set(["Slot Booking", "Tournament Registration"]).has(cleanPayload.form_type)) {
     throw new ValidationError("Unsupported form type.");
   }
-  if (!cleanPayload.form_type || !cleanPayload.phone) {
+  if (!cleanPayload.form_type || !cleanPayload.phone || !cleanPayload.email) {
     throw new ValidationError("Required form details are missing.");
   }
   const phoneDigits = cleanPayload.phone.replace(/\D/g, "");
   if (!/^\+?[\d\s().-]+$/.test(cleanPayload.phone) || phoneDigits.length < 7 || phoneDigits.length > 15) {
     throw new ValidationError("Enter a valid phone number.");
   }
-  if (cleanPayload.email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(cleanPayload.email)) {
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(cleanPayload.email)) {
     throw new ValidationError("Enter a valid email address.");
   }
   if (cleanPayload.form_type === "Slot Booking" && (!cleanPayload.fullname || !cleanPayload.booking_date)) {

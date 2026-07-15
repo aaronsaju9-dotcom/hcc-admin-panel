@@ -117,6 +117,18 @@ async function checkHardenedProduction() {
     });
     assert.equal(invalidBooking.status, 400);
 
+    const missingEmail = await request(origin, "/api/form-submit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: origin },
+      body: JSON.stringify({
+        form_type: "Slot Booking",
+        fullname: "Test User",
+        phone: "+971 50 123 4567",
+        booking_date: "2026-07-20"
+      })
+    });
+    assert.equal(missingEmail.status, 400);
+
     const sitemap = await request(origin, "/sitemap.xml", {
       headers: { Host: "attacker.example" }
     });
