@@ -807,6 +807,11 @@ video {
   resize: vertical;
 }
 
+.booking-action-buttons {
+  display: grid;
+  gap: 8px;
+}
+
 .booking-pagination {
   display: flex;
   align-items: center;

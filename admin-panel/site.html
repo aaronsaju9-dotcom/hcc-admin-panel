@@ -592,6 +592,23 @@
     text-transform: uppercase; color: var(--mid); display: block; margin-bottom: 6px;
   }
   .tournament-name-banner .banner-name { font-family: 'Playfair Display', serif; font-size: 1.3rem; font-weight: 700; color: var(--red); }
+  .booking-status-check {
+    margin-top: 32px; padding: 32px; text-align: left;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--white);
+  }
+  .booking-status-check h3 { margin: 0; font-family: 'Playfair Display', serif; font-size: 1.6rem; color: var(--charcoal); }
+  .booking-status-check > p { margin: 8px 0 22px; color: var(--mid); line-height: 1.6; }
+  .booking-status-grid { display: grid; grid-template-columns: 1fr 1fr auto; gap: 14px; align-items: end; }
+  .booking-status-submit {
+    min-height: 50px; padding: 0 24px; border: 0; border-radius: 4px;
+    background: var(--charcoal); color: #fff; cursor: pointer; font-weight: 700;
+    letter-spacing: 1px; text-transform: uppercase;
+  }
+  .booking-status-submit:disabled { cursor: wait; opacity: 0.6; }
+  .booking-status-result { display: none; margin-top: 18px; padding: 16px; border-radius: 6px; line-height: 1.6; }
+  .booking-status-result.visible { display: block; }
+  .booking-status-result.success { color: #0b5a38; background: #edf8f2; border: 1px solid #b8ddc9; }
+  .booking-status-result.error { color: var(--red); background: #fff0f1; border: 1px solid #f0b9bd; }
 
   /* ─── TOURNAMENT PAGE ─── */
   .tournament-page {
@@ -2857,6 +2874,11 @@
     }
   }
 
+  @media (max-width: 760px) {
+    .booking-status-check { padding: 24px 18px; }
+    .booking-status-grid { grid-template-columns: 1fr; }
+    .booking-status-submit { width: 100%; }
+  }
 </style>
 </head>
 <body>
@@ -3246,6 +3268,24 @@
           <button type="submit" id="tournament-submit-btn">Register Team →</button>
         </div>
       </form>
+    </div>
+    <div class="booking-status-check reveal">
+      <h3>Check your booking status</h3>
+      <p>Use the reference from your confirmation screen and the same email address used for the request.</p>
+      <form id="booking-status-form">
+        <div class="booking-status-grid">
+          <div class="form-group">
+            <label>Booking Reference</label>
+            <input name="reference" type="text" placeholder="HCC-20260715-A1B2C3D4" autocomplete="off" maxlength="40" required>
+          </div>
+          <div class="form-group">
+            <label>Email Address</label>
+            <input name="email" type="email" placeholder="your@email.com" autocomplete="email" required>
+          </div>
+          <button class="booking-status-submit" type="submit">Check status</button>
+        </div>
+      </form>
+      <div class="booking-status-result" id="booking-status-result" role="status" aria-live="polite"></div>
     </div>
   </div>
 </section>
@@ -4662,6 +4702,42 @@ if (statsSection) counterObs.observe(statsSection);
 /* ─── FORM EVENT LISTENERS ─── */
 document.getElementById('slot-booking-form').addEventListener('submit', (e) => handleFormSubmit(e.target, e));
 document.getElementById('tournament-booking-form').addEventListener('submit', (e) => handleFormSubmit(e.target, e));
+document.getElementById('booking-status-form').addEventListener('submit', async function (event) {
+  event.preventDefault();
+  const button = this.querySelector('[type="submit"]');
+  const result = document.getElementById('booking-status-result');
+  const data = Object.fromEntries(new FormData(this).entries());
+  data.reference = String(data.reference || '').trim().toUpperCase();
+  button.disabled = true;
+  button.textContent = 'Checking...';
+  result.className = 'booking-status-result';
+  try {
+    const response = await fetch('/api/booking-status', {
+      method: 'POST',
+      headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    const booking = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(booking.error || 'No matching booking was found.');
+    const labels = {
+      new: 'Received — HCC has your request.',
+      contacted: 'Contacted — the HCC team is following up.',
+      confirmed: 'Confirmed — your booking has been approved.',
+      declined: 'Not available — please contact HCC for alternatives.',
+      completed: 'Completed.',
+      cancelled: 'Cancelled.'
+    };
+    const detail = booking.booking_date_label || booking.booking_date || booking.tournament_name || booking.booking_type || '';
+    result.textContent = `${booking.reference}: ${labels[booking.status] || booking.status}${detail ? ` ${detail}.` : ''}`;
+    result.className = 'booking-status-result visible success';
+  } catch (error) {
+    result.textContent = error.message || 'We could not check that booking.';
+    result.className = 'booking-status-result visible error';
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Check status';
+  }
+});
 
 /* ─── TOURNAMENT SELECT → BANNER SYNC ─── */
 document.getElementById('tournament-select').addEventListener('change', function () {

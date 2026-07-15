@@ -14,6 +14,7 @@ Open:
 - Admin: `http://localhost:8765/admin`
 - Content API: `http://localhost:8765/api/content`
 - Protected bookings API: `http://localhost:8765/api/bookings`
+- Public booking-status API: `POST http://localhost:8765/api/booking-status`
 
 Without Supabase environment variables, the app uses `data/content.json` as a local fallback.
 
@@ -123,6 +124,22 @@ This keeps the Formspree URL out of `site.html` and lets you change forms from R
 
 Every valid booking is saved before it is forwarded, receives a server-generated reference such as `HCC-20260715-A1B2C3D4`, and can be managed from **Bookings** in the admin panel. Status and internal notes are private admin fields. For persistent production booking history, run the latest `supabase-schema.sql` and set `SUPABASE_BOOKINGS_TABLE=hcc_bookings` in Render.
 
+Customers can check progress from the website or app using the booking reference and the matching email address. The public status response intentionally excludes names, phone numbers, email addresses, submitted notes, delivery state, and private admin notes. Failed lookups use the same response whether the reference or email is wrong.
+
+Admins can permanently delete an individual booking from its expanded card. This cannot be undone, so export a CSV or database backup first when the record may still be needed.
+
+Optional automatic retention is controlled with:
+
+```bash
+BOOKING_RETENTION_DAYS=0
+```
+
+`0` disables automatic deletion. A positive whole number deletes bookings older than that many days when the booking list is read. Choose a period only after confirming HCC's operational, accounting, dispute, and legal requirements.
+
+### Customer Auto-response Email
+
+The server includes the generated `booking_reference` and customer `email` in the Formspree submission. To send an automatic acknowledgement, configure an Auto Response action in the Formspree dashboard Workflow for this form. Formspree currently lists autoresponses for Professional and Business plans and requires an `email` field, which these forms provide. The message should state that the request is not confirmed yet and provide HCC's phone/email for urgent changes. Only include the booking reference if the selected Formspree plan, sending-domain setup, and template explicitly support submission fields in autoresponses. This is a Formspree account setting; it is not enabled by source code alone.
+
 ## Admin Login
 
 The admin panel and content writes are protected by a login page.
@@ -145,6 +162,7 @@ SUPABASE_URL=https://your-project-ref.supabase.co
 SUPABASE_ANON_KEY=your-public-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-server-only-service-role-key
 SUPABASE_BOOKINGS_TABLE=hcc_bookings
+BOOKING_RETENTION_DAYS=0
 SUPABASE_AUTH_ENABLED=true
 ADMIN_EMAILS=owner@example.com
 CLOUDINARY_CLOUD_NAME=your-cloud-name
@@ -212,6 +230,7 @@ If the audit table is missing, the app falls back to `data/audit.json` and conte
    - `SUPABASE_SERVICE_ROLE_KEY`
    - `SUPABASE_AUDIT_TABLE`
    - `SUPABASE_BOOKINGS_TABLE=hcc_bookings`
+   - `BOOKING_RETENTION_DAYS=0`
    - `SUPABASE_AUTH_ENABLED`
    - `ADMIN_EMAILS`
    - `CLOUDINARY_CLOUD_NAME`

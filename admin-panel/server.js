@@ -5,7 +5,7 @@ const crypto = require("crypto");
 
 const PORT = Number(process.env.PORT || 8765);
 const ROOT = path.resolve(__dirname);
-const DATA_DIR = path.join(ROOT, "data");
+const DATA_DIR = process.env.HCC_DATA_DIR ? path.resolve(process.env.HCC_DATA_DIR) : path.join(ROOT, "data");
 const CONTENT_FILE = path.join(DATA_DIR, "content.json");
 const AUDIT_FILE = path.join(DATA_DIR, "audit.json");
 const BOOKINGS_FILE = path.join(DATA_DIR, "bookings.json");
@@ -32,6 +32,8 @@ const CLOUDINARY_API_KEY = process.env.CLOUDINARY_API_KEY || "";
 const CLOUDINARY_API_SECRET = process.env.CLOUDINARY_API_SECRET || "";
 const CLOUDINARY_FOLDER = process.env.CLOUDINARY_FOLDER || "hcc-website";
 const FORMSPREE_ENDPOINT = process.env.FORMSPREE_ENDPOINT || "";
+const BOOKING_RETENTION_DAYS_VALUE = Number(process.env.BOOKING_RETENTION_DAYS || 0);
+const BOOKING_RETENTION_DAYS = Number.isFinite(BOOKING_RETENTION_DAYS_VALUE) ? Math.floor(Math.max(0, BOOKING_RETENTION_DAYS_VALUE)) : 0;
 const TRUST_PROXY = process.env.TRUST_PROXY === "true";
 const PUBLIC_ORIGIN = parseOrigin(process.env.PUBLIC_ORIGIN || "");
 const SESSION_TTL_MS = Math.max(1, Number(process.env.ADMIN_SESSION_HOURS || 8)) * 60 * 60 * 1000;
@@ -356,9 +358,68 @@ function createBookingReference(now = new Date()) {
 }
 
 async function readBookings() {
+  await purgeExpiredBookings();
   if (!hasSupabaseConfig()) return readLocalBookings();
   const rows = await supabaseRequest(`${SUPABASE_BOOKINGS_TABLE}?select=*&order=created_at.desc&limit=1000`);
   return Array.isArray(rows) ? rows : [];
+}
+
+async function findBookingForCustomer(reference, email) {
+  await purgeExpiredBookings();
+  let booking;
+  if (hasSupabaseConfig()) {
+    const rows = await supabaseRequest(`${SUPABASE_BOOKINGS_TABLE}?reference=eq.${encodeURIComponent(reference)}&select=reference,status,updated_at,form_type,booking_type,booking_date,booking_date_label,time_slot,tournament_name,email&limit=1`);
+    booking = Array.isArray(rows) ? rows[0] : null;
+  } else {
+    booking = readLocalBookings().find((item) => item.reference === reference);
+  }
+  if (!booking || String(booking.email || "").trim().toLowerCase() !== email) return null;
+  return {
+    reference: booking.reference,
+    status: booking.status,
+    updated_at: booking.updated_at,
+    form_type: booking.form_type,
+    booking_type: booking.booking_type,
+    booking_date: booking.booking_date,
+    booking_date_label: booking.booking_date_label,
+    time_slot: booking.time_slot,
+    tournament_name: booking.tournament_name
+  };
+}
+
+async function deleteBooking(reference) {
+  if (hasSupabaseConfig()) {
+    const rows = await supabaseRequest(`${SUPABASE_BOOKINGS_TABLE}?reference=eq.${encodeURIComponent(reference)}`, {
+      method: "DELETE",
+      headers: { Prefer: "return=representation" }
+    });
+    if (!Array.isArray(rows) || !rows[0]) throw new ValidationError("Booking not found.");
+    return rows[0];
+  }
+  const rows = readLocalBookings();
+  const booking = rows.find((item) => item.reference === reference);
+  if (!booking) throw new ValidationError("Booking not found.");
+  writeLocalBookings(rows.filter((item) => item.reference !== reference));
+  return booking;
+}
+
+async function purgeExpiredBookings() {
+  if (!BOOKING_RETENTION_DAYS) return 0;
+  const cutoff = new Date(Date.now() - BOOKING_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  if (hasSupabaseConfig()) {
+    const rows = await supabaseRequest(`${SUPABASE_BOOKINGS_TABLE}?created_at=lt.${encodeURIComponent(cutoff.toISOString())}`, {
+      method: "DELETE",
+      headers: { Prefer: "return=representation" }
+    });
+    return Array.isArray(rows) ? rows.length : 0;
+  }
+  const rows = readLocalBookings();
+  const kept = rows.filter((item) => {
+    const createdAt = new Date(item.created_at || 0).getTime();
+    return !Number.isFinite(createdAt) || createdAt >= cutoff.getTime();
+  });
+  if (kept.length !== rows.length) writeLocalBookings(kept);
+  return rows.length - kept.length;
 }
 
 async function createBooking(payload) {
@@ -371,7 +432,7 @@ async function createBooking(payload) {
     delivery_status: "pending",
     form_type: payload.form_type || "Booking Request",
     fullname: payload.fullname || payload.captain_name || "",
-    email: payload.email || "",
+    email: String(payload.email || "").trim().toLowerCase(),
     phone: payload.phone || "",
     booking_type: payload.booking_type || "",
     booking_date: payload.booking_date || "",
@@ -1494,6 +1555,7 @@ const server = http.createServer(async (request, response) => {
         ok: true,
         contentStorage: hasSupabaseConfig() ? "supabase" : "local-json",
         bookingStorage: hasSupabaseConfig() ? "supabase" : "local-json",
+        bookingRetentionDays: BOOKING_RETENTION_DAYS,
         imageStorage: hasCloudinaryConfig() ? "cloudinary" : "local-data",
         auth: authMode(),
         localAdmin: localAdminEnabled() ? "enabled" : "disabled",
@@ -1586,6 +1648,7 @@ const server = http.createServer(async (request, response) => {
         provider: session?.provider || "basic",
         contentStorage: hasSupabaseConfig() ? "supabase" : "local-json",
         bookingStorage: hasSupabaseConfig() ? "supabase" : "local-json",
+        bookingRetentionDays: BOOKING_RETENTION_DAYS,
         imageStorage: hasCloudinaryConfig() ? "cloudinary" : "local-data",
         auth: authMode(),
         forms: FORMSPREE_ENDPOINT ? "configured" : "missing"
@@ -1610,6 +1673,26 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (parsed.pathname === "/api/booking-status" && request.method === "POST") {
+      if (!checkRateLimit(request, "booking-status", 12, 15 * 60 * 1000)) {
+        sendJson(response, 429, { error: "Too many status checks. Please try again later." });
+        return;
+      }
+      const payload = JSON.parse(await readBody(request, 8 * 1024));
+      const reference = String(payload.reference || "").trim().toUpperCase();
+      const email = String(payload.email || "").trim().toLowerCase();
+      if (!/^HCC-\d{8}-[A-Z0-9]{6,12}$/.test(reference) || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+        throw new ValidationError("Enter a valid booking reference and email address.");
+      }
+      const booking = await findBookingForCustomer(reference, email);
+      if (!booking) {
+        sendJson(response, 404, { error: "No matching booking was found." });
+        return;
+      }
+      sendJson(response, 200, booking);
+      return;
+    }
+
     if (parsed.pathname.startsWith("/api/bookings/") && request.method === "PATCH") {
       if (!checkRateLimit(request, "booking-update", 120, 60 * 1000)) {
         sendJson(response, 429, { error: "Too many booking updates" });
@@ -1624,6 +1707,22 @@ const server = http.createServer(async (request, response) => {
       const booking = await updateBooking(reference, changes);
       await logAudit(request, "booking.update", { reference, status: booking.status });
       sendJson(response, 200, booking);
+      return;
+    }
+
+    if (parsed.pathname.startsWith("/api/bookings/") && request.method === "DELETE") {
+      if (!checkRateLimit(request, "booking-delete", 30, 60 * 1000)) {
+        sendJson(response, 429, { error: "Too many booking deletions" });
+        return;
+      }
+      const reference = decodeURIComponent(parsed.pathname.slice("/api/bookings/".length));
+      if (!/^HCC-\d{8}-[A-Z0-9]{6,12}$/.test(reference)) {
+        sendJson(response, 400, { error: "Invalid booking reference" });
+        return;
+      }
+      await deleteBooking(reference);
+      await logAudit(request, "booking.delete", { reference });
+      sendJson(response, 200, { ok: true, reference });
       return;
     }
 

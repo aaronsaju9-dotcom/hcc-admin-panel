@@ -858,6 +858,7 @@ function renderSessionStatus() {
       ["Login type", sessionInfo?.provider || "Unknown"],
       ["Content storage", sessionInfo?.contentStorage || "Unknown"],
       ["Booking storage", sessionInfo?.bookingStorage || "Unknown"],
+      ["Booking retention", sessionInfo?.bookingRetentionDays ? `${sessionInfo.bookingRetentionDays} days` : "Manual deletion"],
       ["Image storage", sessionInfo?.imageStorage || "Unknown"],
       ["Forms", sessionInfo?.forms || "Unknown"]
     ];
@@ -1156,7 +1157,15 @@ function renderBookings() {
       save.type = "button";
       save.textContent = "Save update";
       save.addEventListener("click", () => updateBookingFromCard(booking.reference, statusSelect.value, note.value, save));
-      controls.append(statusLabel, noteLabel, save);
+      const remove = document.createElement("button");
+      remove.className = "btn btn-danger";
+      remove.type = "button";
+      remove.textContent = "Delete permanently";
+      remove.addEventListener("click", () => deleteBookingFromCard(booking.reference, remove));
+      const actions = document.createElement("div");
+      actions.className = "booking-action-buttons";
+      actions.append(save, remove);
+      controls.append(statusLabel, noteLabel, actions);
       expandedContent.appendChild(controls);
       article.appendChild(expandedContent);
     }
@@ -1221,6 +1230,26 @@ async function updateBookingFromCard(reference, status, adminNote, button) {
     button.disabled = false;
     button.textContent = "Save update";
     toast(error.message || "Booking update failed.");
+  }
+}
+
+async function deleteBookingFromCard(reference, button) {
+  if (!reference || !confirm(`Permanently delete booking ${reference}? This cannot be undone.`)) return;
+  button.disabled = true;
+  button.textContent = "Deleting…";
+  try {
+    const response = await fetch(`${API_BOOKINGS_URL}/${encodeURIComponent(reference)}`, { method: "DELETE" });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || "Booking deletion failed.");
+    bookings = bookings.filter((item) => item.reference !== reference);
+    expandedBookingReferences.delete(reference);
+    await loadAuditEntries();
+    renderAll();
+    toast(`${reference} permanently deleted.`);
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = "Delete permanently";
+    toast(error.message || "Booking deletion failed.");
   }
 }
 
