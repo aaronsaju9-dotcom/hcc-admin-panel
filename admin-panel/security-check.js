@@ -92,6 +92,9 @@ async function checkHardenedProduction() {
     assert.equal(home.headers.get("x-frame-options"), "DENY");
     assert.equal((await request(origin, "/logo.webp")).status, 200);
     assert.equal((await request(origin, "/api/content")).status, 200);
+    const bookingStatusPage = await request(origin, "/booking-status");
+    assert.equal(bookingStatusPage.status, 200);
+    assert.match(await bookingStatusPage.text(), /id="status-form"/);
 
     for (const pathname of ["/server.js", "/package.json", "/README.md", "/supabase-schema.sql", "/data/content.json", "/.env"]) {
       assert.equal((await request(origin, pathname)).status, 404, `${pathname} must not be public`);

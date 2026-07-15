@@ -1236,7 +1236,7 @@ function sendRobots(request, response) {
 function sendSitemap(request, response) {
   const origin = getTrustedOrigin(request);
   response.writeHead(200, commonHeaders({ "Content-Type": "application/xml; charset=utf-8" }));
-  response.end(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>${origin}/</loc><priority>1.0</priority></url>\n  <url><loc>${origin}/privacy</loc><priority>0.3</priority></url>\n  <url><loc>${origin}/terms</loc><priority>0.3</priority></url>\n</urlset>\n`);
+  response.end(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>${origin}/</loc><priority>1.0</priority></url>\n  <url><loc>${origin}/booking-status</loc><priority>0.5</priority></url>\n  <url><loc>${origin}/privacy</loc><priority>0.3</priority></url>\n  <url><loc>${origin}/terms</loc><priority>0.3</priority></url>\n</urlset>\n`);
 }
 
 function getOrigin(request) {
@@ -1258,6 +1258,116 @@ function authMode() {
   if (hasSupabaseAuthConfig()) return "supabase-auth";
   if (localAdminEnabled()) return "local-admin";
   return "misconfigured";
+}
+
+function sendBookingStatusPage(response) {
+  response.writeHead(200, {
+    ...commonHeaders({ "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=300" })
+  });
+  response.end(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="index,follow">
+  <title>Check Booking Status | Hamriyah Cricket Centre</title>
+  <meta name="description" content="Track a Hamriyah Cricket Centre booking request using its reference and matching email address.">
+  <style>
+    :root { --red:#c8101e; --ink:#18191c; --muted:#686b72; --cream:#f5f3ed; --line:#e2dfd6; --green:#0b6b43; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; font-family:Arial,sans-serif; color:var(--ink); background:radial-gradient(circle at 85% 15%,rgba(200,16,30,.16),transparent 30%),linear-gradient(145deg,#faf8f1,#f0eee8); }
+    header { width:min(1080px,calc(100% - 32px)); margin:0 auto; padding:24px 0; display:flex; align-items:center; justify-content:space-between; gap:18px; }
+    .brand { display:flex; align-items:center; gap:12px; color:var(--ink); text-decoration:none; font-weight:900; letter-spacing:.05em; }
+    .brand img { width:48px; height:48px; object-fit:contain; }
+    .back { color:var(--ink); text-decoration:none; font-weight:800; font-size:.82rem; letter-spacing:.05em; }
+    main { width:min(780px,calc(100% - 32px)); margin:36px auto 80px; }
+    .eyebrow { color:var(--red); font-size:.78rem; font-weight:900; letter-spacing:.16em; text-transform:uppercase; }
+    h1 { margin:10px 0 12px; max-width:650px; font-size:clamp(2.7rem,9vw,5.6rem); line-height:.9; letter-spacing:-.035em; text-transform:uppercase; }
+    .intro { max-width:600px; margin:0 0 32px; color:var(--muted); font-size:1.04rem; line-height:1.65; }
+    .card { padding:clamp(22px,5vw,44px); border:1px solid var(--line); border-radius:24px; background:rgba(255,255,255,.94); box-shadow:0 24px 80px rgba(24,25,28,.12); }
+    .secure { display:flex; align-items:center; gap:10px; margin-bottom:26px; color:var(--muted); font-size:.88rem; line-height:1.45; }
+    .secure span { width:34px; height:34px; display:grid; place-items:center; flex:0 0 34px; border-radius:50%; background:#fff0f1; color:var(--red); }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+    label { display:grid; gap:8px; color:var(--ink); font-size:.75rem; font-weight:900; letter-spacing:.09em; text-transform:uppercase; }
+    input { width:100%; min-height:54px; padding:0 15px; border:1.5px solid var(--line); border-radius:14px; background:var(--cream); color:var(--ink); font:inherit; outline:none; }
+    input:focus { border-color:var(--red); box-shadow:0 0 0 3px rgba(200,16,30,.09); }
+    button { width:100%; min-height:56px; margin-top:20px; border:0; border-radius:28px; background:var(--ink); color:#fff; cursor:pointer; font-weight:900; letter-spacing:.08em; text-transform:uppercase; }
+    button:disabled { cursor:wait; opacity:.55; }
+    .message { display:none; margin-top:18px; padding:15px 16px; border-radius:14px; line-height:1.55; }
+    .message.visible { display:block; }
+    .message.error { background:#fff4e5; border:1px solid #f1b45d; color:#8a4300; }
+    .message.success { background:#edf8f2; border:1px solid #b8ddc9; color:var(--green); }
+    .reference { display:block; margin-top:7px; color:var(--red); font-weight:900; letter-spacing:.04em; }
+    .privacy { margin:18px 4px 0; color:var(--muted); font-size:.82rem; line-height:1.55; }
+    .privacy a { color:var(--ink); }
+    @media (max-width:620px) { header { align-items:flex-start; } .brand { font-size:.76rem; } .grid { grid-template-columns:1fr; } main { margin-top:20px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <a class="brand" href="/"><img src="/logo.webp" alt="HCC"><span>HAMRIYAH CRICKET CENTRE</span></a>
+    <a class="back" href="/#booking">← BACK TO BOOKING</a>
+  </header>
+  <main>
+    <span class="eyebrow">Your request</span>
+    <h1>Track your booking.</h1>
+    <p class="intro">Enter the reference shown after submission and the same email address used for the request.</p>
+    <section class="card" aria-labelledby="status-form-title">
+      <div class="secure"><span aria-hidden="true">✓</span><div id="status-form-title">For privacy, both details must match. HCC never shows your phone number or private staff notes here.</div></div>
+      <form id="status-form" novalidate>
+        <div class="grid">
+          <label>Booking reference<input name="reference" type="text" placeholder="HCC-20260715-A1B2C3D4" autocomplete="off" maxlength="40"></label>
+          <label>Email address<input name="email" type="email" placeholder="you@example.com" autocomplete="email" maxlength="254"></label>
+        </div>
+        <button type="submit">Check status</button>
+      </form>
+      <div class="message" id="status-result" role="status" aria-live="polite"></div>
+      <p class="privacy">Having trouble? Contact HCC using the details on the <a href="/#contact">website</a>. Read our <a href="/privacy">Privacy Policy</a>.</p>
+    </section>
+  </main>
+  <script>
+    document.getElementById('status-form').addEventListener('submit', async function (event) {
+      event.preventDefault();
+      var button = this.querySelector('button');
+      var result = document.getElementById('status-result');
+      var data = Object.fromEntries(new FormData(this).entries());
+      data.reference = String(data.reference || '').trim().toUpperCase();
+      data.email = String(data.email || '').trim().toLowerCase();
+      result.className = 'message';
+      if (!/^HCC-\\d{8}-[A-Z0-9]{6,12}$/.test(data.reference) || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$/.test(data.email)) {
+        result.textContent = 'Enter a valid HCC booking reference and email address.';
+        result.className = 'message visible error';
+        return;
+      }
+      button.disabled = true;
+      button.textContent = 'Checking...';
+      try {
+        var apiResponse = await fetch('/api/booking-status', { method:'POST', headers:{'Accept':'application/json','Content-Type':'application/json'}, body:JSON.stringify(data) });
+        var booking = await apiResponse.json().catch(function () { return {}; });
+        if (!apiResponse.ok) throw new Error(booking.error || 'No matching booking was found.');
+        var labels = {
+          new:'Received — HCC has your request.', contacted:'Contacted — the HCC team is following up.',
+          confirmed:'Confirmed — your booking has been approved.', declined:'Not available — please contact HCC for alternatives.',
+          completed:'Completed.', cancelled:'Cancelled.'
+        };
+        var detail = booking.booking_date_label || booking.booking_date || booking.tournament_name || booking.booking_type || '';
+        result.textContent = (labels[booking.status] || booking.status) + (detail ? ' ' + detail + '.' : '') + ' ';
+        var reference = document.createElement('span');
+        reference.className = 'reference';
+        reference.textContent = booking.reference;
+        result.appendChild(reference);
+        result.className = 'message visible success';
+      } catch (error) {
+        result.textContent = error.message || 'We could not check that booking.';
+        result.className = 'message visible error';
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Check status';
+      }
+    });
+  </script>
+</body>
+</html>`);
 }
 
 function sendLegalPage(response, type) {
@@ -1576,6 +1686,11 @@ const server = http.createServer(async (request, response) => {
 
     if (parsed.pathname === "/sitemap.xml") {
       sendSitemap(request, response);
+      return;
+    }
+
+    if (parsed.pathname === "/booking-status" && request.method === "GET") {
+      sendBookingStatusPage(response);
       return;
     }
 

@@ -15,6 +15,7 @@ Open:
 - Content API: `http://localhost:8765/api/content`
 - Protected bookings API: `http://localhost:8765/api/bookings`
 - Public booking-status API: `POST http://localhost:8765/api/booking-status`
+- Customer booking-status page: `http://localhost:8765/booking-status`
 
 Without Supabase environment variables, the app uses `data/content.json` as a local fallback.
 
@@ -124,7 +125,7 @@ This keeps the Formspree URL out of `site.html` and lets you change forms from R
 
 Every valid booking is saved before it is forwarded, receives a server-generated reference such as `HCC-20260715-A1B2C3D4`, and can be managed from **Bookings** in the admin panel. Status and internal notes are private admin fields. For persistent production booking history, run the latest `supabase-schema.sql` and set `SUPABASE_BOOKINGS_TABLE=hcc_bookings` in Render.
 
-Customers can check progress from the website or app using the booking reference and the matching email address. The public status response intentionally excludes names, phone numbers, email addresses, submitted notes, delivery state, and private admin notes. Failed lookups use the same response whether the reference or email is wrong.
+Customers can check progress from the dedicated `/booking-status` website page or the separate status screen in the app using the booking reference and matching email address. The public status response intentionally excludes names, phone numbers, email addresses, submitted notes, delivery state, and private admin notes. Failed lookups use the same response whether the reference or email is wrong.
 
 Admins can permanently delete an individual booking from its expanded card. This cannot be undone, so export a CSV or database backup first when the record may still be needed.
 
