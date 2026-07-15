@@ -55,9 +55,11 @@ async function withFakeFormspree(callback) {
   const server = http.createServer(async (request, response) => {
     let body = "";
     for await (const chunk of request) body += chunk;
-    submissions.push(JSON.parse(body || "{}"));
-    response.writeHead(200, { "Content-Type": "application/json" });
-    response.end(JSON.stringify({ ok: true }));
+    const submission = JSON.parse(body || "{}");
+    submissions.push(submission);
+    const rejected = submission.fullname === "Delivery Failure Test";
+    response.writeHead(rejected ? 503 : 200, { "Content-Type": "application/json" });
+    response.end(JSON.stringify(rejected ? { error: "Simulated delivery failure" } : { ok: true }));
   });
   await new Promise((resolve) => server.listen(0, HOST, resolve));
   const address = server.address();
@@ -305,6 +307,35 @@ async function checkBookingLifecycle() {
         body: JSON.stringify({ reference, email: "security.test@example.com" })
       });
       assert.equal(deletedStatus.status, 404);
+
+      const acceptedWithoutEmailDelivery = await request(origin, "/api/form-submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Origin: origin },
+        body: JSON.stringify({
+          form_type: "Slot Booking",
+          fullname: "Delivery Failure Test",
+          email: "delivery.failure@example.com",
+          phone: "+971 50 765 4321",
+          booking_type: "Practice Nets",
+          booking_date: "2026-07-21",
+          booking_date_label: "21 July 2026",
+          time_slot: "6:00 PM - 8:00 PM"
+        })
+      });
+      assert.equal(acceptedWithoutEmailDelivery.status, 202);
+      const delayedBody = await acceptedWithoutEmailDelivery.json();
+      assert.match(delayedBody.reference, /^HCC-\d{8}-[A-F0-9]{8}$/);
+      assert.equal(delayedBody.deliveryStatus, "failed");
+      assert.match(delayedBody.warning, /request was saved/i);
+
+      const delayedList = await request(origin, "/api/bookings", { headers: { Cookie: cookie } });
+      const delayedBooking = (await delayedList.json()).bookings.find((booking) => booking.reference === delayedBody.reference);
+      assert.equal(delayedBooking.delivery_status, "failed");
+      const deletedDelayed = await request(origin, `/api/bookings/${delayedBody.reference}`, {
+        method: "DELETE",
+        headers: { Cookie: cookie, Origin: origin }
+      });
+      assert.equal(deletedDelayed.status, 200);
     });
   });
 }

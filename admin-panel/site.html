@@ -4474,16 +4474,19 @@ async function handleFormSubmit(form, e) {
       body: JSON.stringify(data),
       headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' }
     });
+    const result = await response.json().catch(() => ({}));
     if (response.ok) {
       const tournamentName = form.querySelector('#tournament-name-hidden');
-      const confirmMsg = tournamentName && tournamentName.value
+      let confirmMsg = tournamentName && tournamentName.value
         ? '✅ Registered for ' + tournamentName.value + '! We\'ll contact you within 24 hours.'
         : '✅ Request sent! We\'ll contact you within 24 hours.';
+      if (result.reference) confirmMsg += ' Reference: ' + result.reference + '.';
+      if (result.deliveryStatus === 'failed') confirmMsg += ' Your request is saved; staff email delivery is delayed.';
       showToast(confirmMsg);
       form.reset();
       if (_tournamentsCache) populateTournamentSelect(_tournamentsCache);
     } else {
-      showToast('❌ Something went wrong. Please try WhatsApp instead.');
+      showToast('❌ ' + (result.error || 'We could not save the request. Please check your details and try again.'));
     }
   } catch {
     showToast('❌ Network error. Please contact us directly.');

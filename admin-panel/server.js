@@ -694,10 +694,15 @@ async function forwardFormSubmission(payload) {
       throw new Error(result.error || result.message || "Form submission failed.");
     }
     await updateBooking(booking.reference, { delivery_status: "sent" });
-    return { ok: true, reference: booking.reference };
+    return { ok: true, reference: booking.reference, deliveryStatus: "sent" };
   } catch (error) {
     await updateBooking(booking.reference, { delivery_status: "failed" }).catch(() => {});
-    throw error;
+    return {
+      ok: true,
+      reference: booking.reference,
+      deliveryStatus: "failed",
+      warning: "Your request was saved, but the staff email notification is delayed. HCC can still manage it from the booking dashboard."
+    };
   }
 }
 
@@ -1816,7 +1821,8 @@ const server = http.createServer(async (request, response) => {
         return;
       }
       const payload = JSON.parse(await readBody(request, 32 * 1024));
-      sendJson(response, 200, await forwardFormSubmission(payload));
+      const result = await forwardFormSubmission(payload);
+      sendJson(response, result.deliveryStatus === "failed" ? 202 : 200, result);
       return;
     }
 
