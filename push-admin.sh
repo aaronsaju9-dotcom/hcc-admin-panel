@@ -3,7 +3,7 @@ set -e
 
 cd "$(dirname "$0")"
 
-git add admin-panel
+git add .github .gitignore PUBLISHING_CHECKLIST.md render.yaml admin-panel
 
 if git diff --cached --quiet; then
   echo "No admin-panel changes to commit."
