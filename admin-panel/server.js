@@ -1291,8 +1291,11 @@ function serveFile(requestUrl, response) {
 
 function sendRobots(request, response) {
   const origin = getTrustedOrigin(request);
-  response.writeHead(200, commonHeaders({ "Content-Type": "text/plain; charset=utf-8" }));
-  response.end(`User-agent: *\nDisallow: /admin\nDisallow: /login\nSitemap: ${origin}/sitemap.xml\n`);
+  response.writeHead(200, commonHeaders({
+    "Content-Type": "text/plain; charset=utf-8",
+    "Cache-Control": "public, max-age=300"
+  }));
+  response.end(`User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /login\nDisallow: /reset-request\nDisallow: /reset-password\nDisallow: /api/\nSitemap: ${origin}/sitemap.xml\n`);
 }
 
 function sendSitemap(request, response) {

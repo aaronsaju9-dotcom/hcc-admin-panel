@@ -192,6 +192,13 @@ async function checkHardenedProduction() {
       headers: { Host: "attacker.example" }
     });
     assert.match(await sitemap.text(), new RegExp(`http://${HOST}:${port}`));
+
+    const robots = await request(origin, "/robots.txt");
+    assert.equal(robots.status, 200);
+    const robotsText = await robots.text();
+    assert.match(robotsText, /^User-agent: \*\nAllow: \/$/m);
+    assert.match(robotsText, /^Disallow: \/admin$/m);
+    assert.match(robotsText, /^Disallow: \/api\/$/m);
   });
 }
 
