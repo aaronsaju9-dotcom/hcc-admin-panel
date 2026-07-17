@@ -11,6 +11,6 @@
     "test:security": "node security-check.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=24 <25"
   }
 }

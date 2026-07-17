@@ -566,8 +566,8 @@ function validateTournamentForm() {
   if ($("#tournamentDate").value && Number.isNaN(new Date(`${$("#tournamentDate").value}T00:00:00`).getTime())) {
     return invalid("Choose a valid tournament date.");
   }
-  if (!validOptionalUrl($("#tournamentRegisterLink").value)) return invalid("Register link must start with https:// or http://.");
-  if (!validOptionalUrl($("#tournamentCricLink").value)) return invalid("CricHeroes link must start with https:// or http://.");
+  if (!validOptionalUrl($("#tournamentRegisterLink").value)) return invalid("Register link must be a secure https:// address.");
+  if (!validOptionalUrl($("#tournamentCricLink").value)) return invalid("CricHeroes link must be a secure https:// address.");
   return valid();
 }
 
@@ -606,7 +606,7 @@ function validOptionalUrl(value) {
 function isValidUrl(value) {
   try {
     const url = new URL(String(value || "").trim());
-    return url.protocol === "https:" || url.protocol === "http:" || url.protocol === "mailto:";
+    return url.protocol === "https:" && !url.username && !url.password;
   } catch {
     return false;
   }

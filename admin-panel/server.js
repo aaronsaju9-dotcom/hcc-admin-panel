@@ -81,11 +81,24 @@ function validateStartupConfig() {
   }
 }
 
+function getProductionReadinessIssues() {
+  if (!IS_PRODUCTION) return [];
+  const issues = [];
+  if (!hasSupabaseConfig()) issues.push("supabase-storage");
+  if (!SUPABASE_AUTH_ENABLED || !SUPABASE_URL || !SUPABASE_ANON_KEY || ADMIN_EMAILS.length === 0) issues.push("supabase-auth");
+  if (localAdminEnabled()) issues.push("local-admin-enabled");
+  if (!hasCloudinaryConfig()) issues.push("cloudinary");
+  if (!FORMSPREE_ENDPOINT) issues.push("formspree");
+  return issues;
+}
+
 const publicFiles = new Map([
   ["/site.html", path.resolve(ROOT, "site.html")],
   ["/logo.webp", path.resolve(ROOT, "logo.webp")],
   ["/hero-bg-cricket.webp", path.resolve(ROOT, "hero-bg-cricket.webp")],
   ["/hero-cricket.mp4", path.resolve(ROOT, "hero-cricket.mp4")],
+  ["/gallery-local-1.webp", path.resolve(ROOT, "gallery-local-1.webp")],
+  ["/gallery-local-2.webp", path.resolve(ROOT, "gallery-local-2.webp")],
   ["/index.html", path.resolve(ROOT, "index.html")],
   ["/admin.css", path.resolve(ROOT, "admin.css")],
   ["/admin.js", path.resolve(ROOT, "admin.js")]
@@ -196,21 +209,57 @@ function hasCloudinaryConfig() {
 
 function normalizeContent(content) {
   return {
-    tournaments: normalizeItems(content.tournaments),
-    images: normalizeItems(content.images),
-    socials: normalizeItems(content.socials),
-    testimonials: normalizeItems(content.testimonials)
+    tournaments: normalizeItems(content?.tournaments, "tournaments"),
+    images: normalizeItems(content?.images, "images"),
+    socials: normalizeItems(content?.socials, "socials"),
+    testimonials: normalizeItems(content?.testimonials, "testimonials")
   };
 }
 
-function normalizeItems(items) {
+const CONTENT_URL_FIELDS = new Set(["registerLink", "cricLink", "tournamentLink", "url"]);
+const CONTENT_IMAGE_FIELDS = new Set(["src", "poster", "image", "avatar"]);
+const BLOCKED_CONTENT_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+function sanitizeContentUrl(value, { image = false } = {}) {
+  const clean = String(value || "").trim();
+  if (!clean) return "";
+  if (image && !IS_PRODUCTION && /^data:image\/(?:png|jpeg|webp|gif);base64,[a-z0-9+/=]+$/i.test(clean)) {
+    return clean;
+  }
+  if (image && /^\/(?!\/)[a-z0-9._~!$&'()*+,;=:@%/-]+$/i.test(clean)) return clean;
+  try {
+    const parsed = new URL(clean);
+    return parsed.protocol === "https:" && !parsed.username && !parsed.password ? parsed.href : "";
+  } catch {
+    return "";
+  }
+}
+
+function sanitizeContentValue(key, value) {
+  if (CONTENT_URL_FIELDS.has(key)) return sanitizeContentUrl(value);
+  if (CONTENT_IMAGE_FIELDS.has(key)) return sanitizeContentUrl(value, { image: true });
+  if (Array.isArray(value)) {
+    return value.slice(0, 100).map((entry) => String(entry ?? "").replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 1000));
+  }
+  if (typeof value === "boolean" || typeof value === "number") return value;
+  return String(value ?? "").replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 10000);
+}
+
+function normalizeItems(items, collection = "items") {
   return Array.isArray(items)
-    ? items.map((item, index) => ({
-      ...item,
-      published: item.published !== false,
-      featured: item.featured === true,
-      order: Number.isFinite(Number(item.order)) ? Number(item.order) : index + 1
-    }))
+    ? items.slice(0, 1000).filter((item) => item && typeof item === "object" && !Array.isArray(item)).map((item, index) => {
+      const clean = {};
+      for (const [key, value] of Object.entries(item)) {
+        if (BLOCKED_CONTENT_KEYS.has(key)) continue;
+        clean[key] = sanitizeContentValue(key, value);
+      }
+      const fallbackId = `${collection}-${index + 1}`;
+      clean.id = /^[a-zA-Z0-9_-]{1,100}$/.test(String(clean.id || "")) ? clean.id : fallbackId;
+      clean.published = item.published !== false;
+      clean.featured = item.featured === true;
+      clean.order = Number.isFinite(Number(item.order)) ? Number(item.order) : index + 1;
+      return clean;
+    })
     : [];
 }
 
@@ -224,6 +273,16 @@ function getClientIp(request) {
 function checkRateLimit(request, bucket, limit, windowMs) {
   const key = `${bucket}:${getClientIp(request)}`;
   const now = Date.now();
+  if (!rateLimits.has(key) && rateLimits.size >= 10000) {
+    for (const [storedKey, storedEntry] of rateLimits) {
+      if (storedEntry.resetAt < now) rateLimits.delete(storedKey);
+    }
+    while (rateLimits.size >= 10000) {
+      const oldestKey = rateLimits.keys().next().value;
+      if (oldestKey === undefined) break;
+      rateLimits.delete(oldestKey);
+    }
+  }
   const entry = rateLimits.get(key) || { count: 0, resetAt: now + windowMs };
   if (now > entry.resetAt) {
     entry.count = 0;
@@ -1667,8 +1726,11 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (parsed.pathname === "/health") {
-      sendJson(response, 200, {
-        ok: true,
+      const readinessIssues = getProductionReadinessIssues();
+      sendJson(response, readinessIssues.length ? 503 : 200, {
+        ok: readinessIssues.length === 0,
+        ready: readinessIssues.length === 0,
+        readinessIssues,
         contentStorage: hasSupabaseConfig() ? "supabase" : "local-json",
         bookingStorage: hasSupabaseConfig() ? "supabase" : "local-json",
         bookingRetentionDays: BOOKING_RETENTION_DAYS,

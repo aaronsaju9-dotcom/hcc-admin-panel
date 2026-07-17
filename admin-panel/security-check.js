@@ -13,7 +13,7 @@ async function waitForServer(origin) {
   for (let attempt = 0; attempt < 40; attempt += 1) {
     try {
       const response = await fetch(`${origin}/health`);
-      if (response.ok) return;
+      if (response.status > 0) return;
     } catch {
       // The child process may still be starting.
     }
@@ -86,11 +86,22 @@ async function checkHardenedProduction() {
     ADMIN_PASSWORD: "change-this-password",
     SESSION_SECRET: "security-check-session-secret"
   }, async (origin) => {
+    const health = await request(origin, "/health");
+    assert.equal(health.status, 503);
+    const healthBody = await health.json();
+    assert.equal(healthBody.ok, false);
+    assert.equal(healthBody.ready, false);
+    assert.ok(healthBody.readinessIssues.includes("supabase-storage"));
+    assert.ok(healthBody.readinessIssues.includes("cloudinary"));
+    assert.ok(healthBody.readinessIssues.includes("formspree"));
+
     const home = await request(origin, "/");
     assert.equal(home.status, 200);
     assert.match(home.headers.get("content-security-policy") || "", /frame-ancestors 'none'/);
     assert.equal(home.headers.get("x-frame-options"), "DENY");
     assert.equal((await request(origin, "/logo.webp")).status, 200);
+    assert.equal((await request(origin, "/gallery-local-1.webp")).status, 200);
+    assert.equal((await request(origin, "/gallery-local-2.webp")).status, 200);
     assert.equal((await request(origin, "/api/content")).status, 200);
     const bookingStatusPage = await request(origin, "/booking-status");
     assert.equal(bookingStatusPage.status, 200);
@@ -202,6 +213,36 @@ async function checkExpiringLocalSession() {
     const bookings = await request(origin, "/api/bookings", { headers: { Cookie: cookie.split(";", 1)[0] } });
     assert.equal(bookings.status, 200);
     assert.deepEqual((await bookings.json()).bookings, []);
+
+    const hostileName = "O'Connor </button><script>globalThis.hccXss=true</script>";
+    const contentWrite = await request(origin, "/api/content", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie.split(";", 1)[0], Origin: origin },
+      body: JSON.stringify({
+        tournaments: [{
+          id: "bad'id",
+          name: hostileName,
+          registerLink: "javascript:alert(1)",
+          cricLink: "https://user:password@example.com/private",
+          poster: "data:image/svg+xml,<svg onload=alert(1)></svg>"
+        }],
+        images: [],
+        socials: [{ id: "social-1", label: "Unsafe", url: "javascript:alert(1)" }],
+        testimonials: []
+      })
+    });
+    assert.equal(contentWrite.status, 200);
+    const sanitizedContent = await contentWrite.json();
+    assert.equal(sanitizedContent.tournaments[0].id, "tournaments-1");
+    assert.equal(sanitizedContent.tournaments[0].name, hostileName);
+    assert.equal(sanitizedContent.tournaments[0].registerLink, "");
+    assert.equal(sanitizedContent.tournaments[0].cricLink, "");
+    assert.equal(sanitizedContent.tournaments[0].poster, "");
+    assert.equal(sanitizedContent.socials[0].url, "");
+
+    const siteSource = fs.readFileSync(path.join(ROOT, "site.html"), "utf8");
+    assert.match(siteSource, /data-tournament-action="register"/);
+    assert.doesNotMatch(siteSource, /onclick="openTournament(?:Modal|Registration)\([^)]*escAttr/);
   });
 }
 

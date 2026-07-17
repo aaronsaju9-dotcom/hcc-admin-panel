@@ -376,6 +376,12 @@
     width: 100%;
   }
   .gallery-item {
+    appearance: none;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
     flex: 1 1 0;
     min-width: 72px;
     height: 400px;
@@ -3670,7 +3676,33 @@ function escHtml(str) {
     .replace(/"/g,'&quot;');
 }
 function escAttr(str) {
-  return String(str).replace(/'/g,'&#39;').replace(/"/g,'&quot;');
+  return String(str)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/'/g,'&#39;')
+    .replace(/"/g,'&quot;');
+}
+function safeHttpsUrl(value) {
+  try {
+    const parsed = new URL(String(value || '').trim(), window.location.origin);
+    return parsed.protocol === 'https:' && !parsed.username && !parsed.password ? parsed.href : '';
+  } catch {
+    return '';
+  }
+}
+function safeImageUrl(value) {
+  const clean = String(value || '').trim();
+  if (/^data:image\/(?:png|jpeg|webp|gif);base64,[a-z0-9+/=]+$/i.test(clean)) return clean;
+  if (/^\/(?!\/)/.test(clean)) return new URL(clean, window.location.origin).href;
+  const safe = safeHttpsUrl(clean);
+  if (!safe) return '';
+  const parsed = new URL(safe);
+  if (parsed.hostname === 'res.cloudinary.com' && /\/image\/upload\/v\d+\//.test(parsed.pathname)) {
+    parsed.pathname = parsed.pathname.replace('/image/upload/', '/image/upload/f_auto,q_auto:good,w_1600,c_limit/');
+    return parsed.href;
+  }
+  return safe;
 }
 function setContainerHtml(id, html) {
   const el = document.getElementById(id);
@@ -3684,7 +3716,7 @@ function renderLoadingState() {
   return '<div class="loading-state"><div class="loading-spinner"></div><p>Loading tournaments...</p></div>';
 }
 function renderErrorState(message) {
-  return '<div class="error-state"><span class="error-icon">⚠️</span><h3>Couldn\'t load tournaments</h3><p>' + escHtml(message || 'Failed to connect to the CMS.') + '</p><button class="error-retry-btn" onclick="refreshTournaments()">Try Again</button></div>';
+  return '<div class="error-state"><span class="error-icon">⚠️</span><h3>Couldn\'t load tournaments</h3><p>' + escHtml(message || 'Failed to connect to the CMS.') + '</p><button class="error-retry-btn" data-content-action="refresh-tournaments">Try Again</button></div>';
 }
 function renderEmptyState(icon, title, message) {
   return '<div class="empty-state"><span class="empty-icon">' + icon + '</span><h3>' + escHtml(title) + '</h3><p>' + escHtml(message) + '</p></div>';
@@ -3697,9 +3729,10 @@ function renderCardsGrid(cardsHtml) {
    RENDER: TOURNAMENT CARDS
 ═══════════════════════════════════════════════════════════ */
 function buildCardPoster(t, fallbackEmoji) {
-  if (t.image) {
+  const safeImage = safeImageUrl(t.image);
+  if (safeImage) {
     const ph = '<div class="t-card-poster-placeholder">' + fallbackEmoji + '<span>' + escHtml(t.name) + '</span></div>';
-    return ph + '<img src="' + escAttr(t.image) + '" alt="' + escAttr(t.name) + '" onerror="this.style.display=\'none\'">';
+    return ph + '<img src="' + escAttr(safeImage) + '" alt="' + escAttr(t.name) + '" data-image-fallback="hide">';
   }
   return '<div class="t-card-poster-placeholder">' + fallbackEmoji + '<span>' + escHtml(t.name) + '</span></div>';
 }
@@ -3720,17 +3753,19 @@ function buildCountdownCardHtml(t) {
 }
 
 function buildCricHeroesBtn(t, size) {
-  if (!t.cricHeroes || (t.status !== 'ongoing' && t.status !== 'past')) return '';
+  const safeUrl = safeHttpsUrl(t.cricHeroes);
+  if (!safeUrl || (t.status !== 'ongoing' && t.status !== 'past')) return '';
   const pad = size === 'modal' ? 'padding:14px 24px;font-size:0.82rem;' : '';
-  return '<a href="' + escAttr(t.cricHeroes) + '" target="_blank" rel="noopener" class="t-btn-cricheroes" style="' + pad + '">'
+  return '<a href="' + escAttr(safeUrl) + '" target="_blank" rel="noopener noreferrer" class="t-btn-cricheroes" style="' + pad + '">'
     + '<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>'
     + ' View on CricHeroes</a>';
 }
 
 function buildGoToTournamentBtn(t, size) {
-  if (!t.tournamentLink || (t.status !== 'ongoing' && t.status !== 'past')) return '';
+  const safeUrl = safeHttpsUrl(t.tournamentLink);
+  if (!safeUrl || (t.status !== 'ongoing' && t.status !== 'past')) return '';
   const pad = size === 'modal' ? 'padding:14px 24px;font-size:0.82rem;' : '';
-  return '<a href="' + escAttr(t.tournamentLink) + '" target="_blank" rel="noopener" class="t-btn-goto" style="' + pad + '">'
+  return '<a href="' + escAttr(safeUrl) + '" target="_blank" rel="noopener noreferrer" class="t-btn-goto" style="' + pad + '">'
     + '<svg viewBox="0 0 24 24"><path d="M19 19H5V5h7V3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>'
     + ' Go to Tournament</a>';
 }
@@ -3739,9 +3774,9 @@ function renderUpcomingCard(t) {
   const cdId  = 'cd-card-' + t.id;
   const cdHtml = buildCountdownCardHtml(t);
   const regBtn = t.registrationOpen
-    ? '<button class="t-btn-register" onclick="openTournamentRegistration(\'' + escAttr(t.id) + '\',\'' + escAttr(t.name) + '\')">Register Team</button>'
+    ? '<button class="t-btn-register" data-tournament-action="register" data-tournament-id="' + escAttr(t.id) + '" data-tournament-name="' + escAttr(t.name) + '">Register Team</button>'
     : '<button class="t-btn-register" disabled>Registration Closed</button>';
-  const detailsBtn = '<button class="t-btn-details" onclick="openTournamentModal(\'' + escAttr(t.id) + '\')">View Details</button>';
+  const detailsBtn = '<button class="t-btn-details" data-tournament-action="details" data-tournament-id="' + escAttr(t.id) + '">View Details</button>';
   return '<div class="tournament-card">'
     + '<div class="t-card-poster"><span class="t-card-status-pill upcoming-pill">📅 Upcoming</span>' + buildCardPoster(t,'🏏') + '</div>'
     + '<div class="t-card-body">'
@@ -3755,7 +3790,7 @@ function renderUpcomingCard(t) {
 }
 
 function renderOngoingCard(t) {
-  const detailsBtn = '<button class="t-btn-details" onclick="openTournamentModal(\'' + escAttr(t.id) + '\')">View Details</button>';
+  const detailsBtn = '<button class="t-btn-details" data-tournament-action="details" data-tournament-id="' + escAttr(t.id) + '">View Details</button>';
   const chBtn      = buildCricHeroesBtn(t, 'card');
   const gotoBtn    = buildGoToTournamentBtn(t, 'card');
   
@@ -3771,7 +3806,7 @@ function renderOngoingCard(t) {
 }
 
 function renderPastCard(t) {
-  const detailsBtn = '<button class="t-btn-details" onclick="openTournamentModal(\'' + escAttr(t.id) + '\')">View Details</button>';
+  const detailsBtn = '<button class="t-btn-details" data-tournament-action="details" data-tournament-id="' + escAttr(t.id) + '">View Details</button>';
   const chBtn      = buildCricHeroesBtn(t, 'card');
   const gotoBtn    = buildGoToTournamentBtn(t, 'card');
   
@@ -3799,11 +3834,12 @@ function openTournamentModal(id) {
   // Remove old poster content except close button and status pill
   const pillEl = document.getElementById('t-modal-status-pill');
 
-  if (t.image) {
+  const safePosterUrl = safeImageUrl(t.image);
+  if (safePosterUrl) {
     // Create img element safely
     let imgEl = posterEl.querySelector('img');
     if (!imgEl) { imgEl = document.createElement('img'); posterEl.appendChild(imgEl); }
-    imgEl.src = t.image;
+    imgEl.src = safePosterUrl;
     imgEl.alt = t.name;
     imgEl.style.width = '100%';
     imgEl.style.height = '100%';
@@ -3921,7 +3957,7 @@ function openTournamentModal(id) {
   const actionsEl = document.getElementById('t-modal-actions');
   let actionsHtml = '';
   if ((t.status === 'upcoming' || t.status === 'ongoing') && t.registrationOpen) {
-    actionsHtml += '<button class="t-btn-register" style="padding:14px 32px;font-size:0.82rem" onclick="closeTournamentModal();openTournamentRegistration(\'' + escAttr(t.id) + '\',\'' + escAttr(t.name) + '\')">Register Team</button>';
+    actionsHtml += '<button class="t-btn-register" style="padding:14px 32px;font-size:0.82rem" data-tournament-action="register-modal" data-tournament-id="' + escAttr(t.id) + '" data-tournament-name="' + escAttr(t.name) + '">Register Team</button>';
   }
   actionsHtml += buildCricHeroesBtn(t, 'modal');
   actionsHtml += buildGoToTournamentBtn(t, 'modal');
@@ -4098,14 +4134,14 @@ async function loadGallery() {
 }
 
 function buildGalleryItem(item) {
+  const safeImage = safeImageUrl(item.image);
+  if (!safeImage) return '';
   const titleAttr = escAttr(item.title || 'Photo');
-  const titleHtml = item.title ? escHtml(item.title) : '';
-  return '<div class="gallery-item" onclick="openLightbox(\'' + escAttr(item.image) + '\',\'' + titleAttr + '\')">'
+  return '<button type="button" class="gallery-item" data-gallery-src="' + escAttr(safeImage) + '" data-gallery-title="' + titleAttr + '">'
     + '<div class="gallery-item-inner">'
-    + '<img src="' + escAttr(item.image) + '" alt="' + titleAttr + '" loading="lazy" '
-    + 'onerror="this.parentElement.innerHTML=\'<div class=gallery-placeholder-inner gp-1>🏏<span>' + escAttr(titleHtml || 'Photo') + '</span></div>\'">'
+    + '<img src="' + escAttr(safeImage) + '" alt="' + titleAttr + '" loading="lazy" data-image-fallback="gallery">'
     + '<div class="gallery-item-overlay"><div class="gallery-item-title">' + escHtml(item.title || '') + '</div></div>'
-    + '</div></div>';
+    + '</div></button>';
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -4193,10 +4229,10 @@ function buildTestimonialCard(t) {
   const initials = t.name.split(' ').map(w => w[0]).join('').substring(0,2).toUpperCase();
 
   let avatarHtml;
-  if (t.image) {
+  const safeAvatar = safeImageUrl(t.image);
+  if (safeAvatar) {
     avatarHtml = '<div class="testimonial-avatar">'
-      + '<img src="' + escAttr(t.image) + '" alt="' + escAttr(t.name) + '" '
-      + 'onerror="this.parentElement.innerHTML=\'' + escAttr(initials) + '\'">'
+      + '<img src="' + escAttr(safeAvatar) + '" alt="' + escAttr(t.name) + '" data-image-fallback="avatar" data-fallback-text="' + escAttr(initials) + '">'
       + '</div>';
   } else {
     avatarHtml = '<div class="testimonial-avatar">' + escHtml(initials) + '</div>';
@@ -4219,7 +4255,8 @@ async function loadSocials() {
   try {
     const content = await fetchContent();
     const socials = content.socials
-      .filter(s => s && s.published !== false && s.visible && s.url)
+      .map(s => ({ ...s, safeUrl: safeHttpsUrl(s && s.url) }))
+      .filter(s => s && s.published !== false && s.visible && s.safeUrl)
       .sort((a, b) => (Number(a.order) || 9999) - (Number(b.order) || 9999));
     if (!socials.length) return;
 
@@ -4232,7 +4269,7 @@ async function loadSocials() {
           : platform.includes('facebook') ? 'social-btn-fb'
           : platform.includes('youtube') ? 'social-btn-yt'
           : '';
-        return '<a class="social-btn ' + className + '" href="' + escAttr(s.url) + '" target="_blank" rel="noopener" title="' + escAttr(s.platform || s.label) + '">'
+        return '<a class="social-btn ' + className + '" href="' + escAttr(s.safeUrl) + '" target="_blank" rel="noopener noreferrer" title="' + escAttr(s.platform || s.label) + '">'
           + '<span class="social-icon">' + escHtml(socialIcon(s.platform)) + '</span>' + escHtml(s.label || s.platform) + '</a>';
       }).join('');
     }
@@ -4240,7 +4277,7 @@ async function loadSocials() {
     const footer = document.querySelector('.footer-social');
     if (footer) {
       footer.innerHTML = socials.map(s =>
-        '<a class="footer-social-btn" href="' + escAttr(s.url) + '" target="_blank" rel="noopener" title="' + escAttr(s.platform || s.label) + '">'
+        '<a class="footer-social-btn" href="' + escAttr(s.safeUrl) + '" target="_blank" rel="noopener noreferrer" title="' + escAttr(s.platform || s.label) + '">'
         + escHtml(socialIcon(s.platform)) + '</a>'
       ).join('');
     }
@@ -4789,6 +4826,57 @@ if (statsSection) counterObs.observe(statsSection);
 document.getElementById('tournament-select').addEventListener('change', function () {
   updateTournamentBanner(this);
 });
+
+/* ─── SAFE DYNAMIC CONTENT EVENTS ─── */
+document.addEventListener('click', event => {
+  const target = event.target instanceof Element ? event.target : null;
+  if (!target) return;
+
+  const contentAction = target.closest('[data-content-action]');
+  if (contentAction && contentAction.dataset.contentAction === 'refresh-tournaments') {
+    refreshTournaments();
+    return;
+  }
+
+  const tournamentAction = target.closest('[data-tournament-action]');
+  if (tournamentAction) {
+    const action = tournamentAction.dataset.tournamentAction;
+    const id = tournamentAction.dataset.tournamentId || '';
+    const name = tournamentAction.dataset.tournamentName || '';
+    if (action === 'details') openTournamentModal(id);
+    if (action === 'register' || action === 'register-modal') {
+      if (action === 'register-modal') closeTournamentModal();
+      openTournamentRegistration(id, name);
+    }
+    return;
+  }
+
+  const galleryItem = target.closest('[data-gallery-src]');
+  if (galleryItem) openLightbox(galleryItem.dataset.gallerySrc || '', galleryItem.dataset.galleryTitle || '');
+});
+
+document.addEventListener('error', event => {
+  const image = event.target;
+  if (!(image instanceof HTMLImageElement)) return;
+  const fallback = image.dataset.imageFallback;
+  if (fallback === 'hide') {
+    image.style.display = 'none';
+    return;
+  }
+  if (fallback === 'avatar' && image.parentElement) {
+    image.parentElement.textContent = image.dataset.fallbackText || 'HCC';
+    return;
+  }
+  if (fallback === 'gallery' && image.parentElement) {
+    const placeholder = document.createElement('div');
+    placeholder.className = 'gallery-placeholder-inner gp-1';
+    const icon = document.createTextNode('🏏');
+    const label = document.createElement('span');
+    label.textContent = image.alt || 'Photo';
+    placeholder.append(icon, label);
+    image.parentElement.replaceChildren(placeholder);
+  }
+}, true);
 
 /* ─── INIT ─── */
 loadAndRenderTournaments();

@@ -5,6 +5,7 @@ This folder contains the shared website/mobile-app admin panel, Supabase-ready c
 ## Local Run
 
 ```bash
+npm ci
 npm start
 ```
 
@@ -111,6 +112,9 @@ Included server hardening:
 - Form validation for links, dates, and required fields
 - Cloudinary cleanup for images uploaded after this update
 - Server-backed admin audit log
+- Server-side sanitization and HTTPS-only validation for CMS links and media
+- Bounded in-memory rate-limit storage
+- Production-readiness health checks that return HTTP 503 when required services are missing
 - SEO meta tags, structured data, privacy page, and terms page
 
 ## Formspree Endpoint
@@ -217,9 +221,10 @@ If the audit table is missing, the app falls back to `data/audit.json` and conte
 1. Push this `admin-panel` folder to a GitHub repository.
 2. Create a new Render Web Service.
 3. Use this folder as the app root if your repo contains more than this folder.
-4. Build command: leave empty or use `npm install`.
+4. Build command: `npm ci`.
 5. Start command: `npm start`.
-6. Add environment variables:
+6. Health check path: `/health`. A production deployment returns HTTP 503 until Supabase storage/auth, Cloudinary, and Formspree are configured and local admin is disabled.
+7. Add environment variables:
    - `ADMIN_USER`
    - `ADMIN_PASSWORD`
    - `SESSION_SECRET`
@@ -238,7 +243,7 @@ If the audit table is missing, the app falls back to `data/audit.json` and conte
    - `CLOUDINARY_API_KEY`
    - `CLOUDINARY_API_SECRET`
    - `FORMSPREE_ENDPOINT`
-7. Admin edits will use Supabase and image uploads will use Cloudinary when those variables are configured.
+8. Admin edits will use Supabase and image uploads will use Cloudinary when those variables are configured.
 
 ## Hosting On Railway
 

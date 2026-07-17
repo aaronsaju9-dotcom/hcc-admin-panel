@@ -1,0 +1,52 @@
+services:
+  - type: web
+    name: hcc-with-admin-panel
+    runtime: node
+    rootDir: admin-panel
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY
+        value: "true"
+      - key: ADMIN_SESSION_HOURS
+        value: "8"
+      - key: ALLOW_LOCAL_ADMIN
+        value: "false"
+      - key: SUPABASE_AUTH_ENABLED
+        value: "true"
+      - key: SUPABASE_CONTENT_TABLE
+        value: hcc_site_content
+      - key: SUPABASE_AUDIT_TABLE
+        value: hcc_admin_audit
+      - key: SUPABASE_BOOKINGS_TABLE
+        value: hcc_bookings
+      - key: CONTENT_RECORD_ID
+        value: main
+      - key: CLOUDINARY_FOLDER
+        value: hcc-website
+      - key: BOOKING_RETENTION_DAYS
+        value: "0"
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: PUBLIC_ORIGIN
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: ADMIN_EMAILS
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: FORMSPREE_ENDPOINT
+        sync: false
