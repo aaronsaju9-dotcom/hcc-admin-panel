@@ -1432,6 +1432,104 @@ function sendBookingStatusPage(response) {
 </html>`);
 }
 
+function sendBookingConfirmationPage(response) {
+  response.writeHead(200, {
+    ...commonHeaders({ "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" })
+  });
+  response.end(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Booking Request Received | Hamriyah Cricket Centre</title>
+  <style>
+    :root { --red:#c8101e; --ink:#18191c; --muted:#686b72; --cream:#f5f3ed; --line:#e2dfd6; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; font-family:Arial,sans-serif; color:var(--ink); background:radial-gradient(circle at 85% 15%,rgba(200,16,30,.16),transparent 30%),linear-gradient(145deg,#faf8f1,#f0eee8); }
+    header { width:min(1080px,calc(100% - 32px)); margin:0 auto; padding:24px 0; display:flex; align-items:center; justify-content:space-between; gap:18px; }
+    .brand { display:flex; align-items:center; gap:12px; color:var(--ink); text-decoration:none; font-weight:900; letter-spacing:.05em; }
+    .brand img { width:48px; height:48px; object-fit:contain; }
+    main { width:min(720px,calc(100% - 32px)); margin:24px auto 70px; text-align:center; }
+    .check { width:82px; height:82px; margin:0 auto 22px; display:grid; place-items:center; border-radius:50%; background:var(--red); color:#fff; font-size:2.5rem; font-weight:900; box-shadow:0 16px 38px rgba(200,16,30,.3); }
+    .eyebrow { color:var(--red); font-size:.78rem; font-weight:900; letter-spacing:.16em; text-transform:uppercase; }
+    h1 { margin:10px auto 14px; max-width:670px; font-size:clamp(2.5rem,8vw,5rem); line-height:.92; letter-spacing:-.035em; text-transform:uppercase; }
+    .intro { max-width:580px; margin:0 auto 28px; color:var(--muted); font-size:1.02rem; line-height:1.65; }
+    .card { padding:clamp(22px,5vw,40px); border:1px solid var(--line); border-radius:24px; background:rgba(255,255,255,.95); box-shadow:0 24px 80px rgba(24,25,28,.12); text-align:left; }
+    .reference { padding:20px; border:2px solid var(--red); border-radius:18px; text-align:center; background:#fff8f8; }
+    .reference-label { display:block; color:var(--muted); font-size:.72rem; font-weight:900; letter-spacing:.13em; text-transform:uppercase; }
+    .reference-value { display:block; margin-top:7px; overflow-wrap:anywhere; color:var(--red); font-size:clamp(1.45rem,6vw,2.25rem); font-weight:900; letter-spacing:.04em; }
+    .reference-help { margin:8px 0 0; color:var(--muted); font-size:.82rem; line-height:1.45; }
+    .details { margin-top:18px; display:grid; gap:10px; }
+    .detail { padding:15px 17px; border:1px solid var(--line); border-radius:15px; background:var(--cream); }
+    .detail-label { display:block; margin-bottom:5px; color:var(--muted); font-size:.69rem; font-weight:900; letter-spacing:.1em; text-transform:uppercase; }
+    .detail-value { color:var(--ink); font-weight:800; line-height:1.45; }
+    .warning { display:none; margin-top:16px; padding:14px 16px; border:1px solid #f1b45d; border-radius:14px; background:#fff4e5; color:#8a4300; font-size:.88rem; font-weight:700; line-height:1.5; }
+    .actions { margin-top:22px; display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .button { min-height:54px; padding:0 18px; display:flex; align-items:center; justify-content:center; border:1px solid var(--ink); border-radius:27px; color:#fff; background:var(--ink); text-decoration:none; font-size:.78rem; font-weight:900; letter-spacing:.08em; text-transform:uppercase; }
+    .button.secondary { color:var(--ink); background:#fff; }
+    .missing { display:none; padding:26px; border:1px solid var(--line); border-radius:20px; background:#fff; }
+    @media (max-width:600px) { header { justify-content:center; } .brand { font-size:.76rem; } main { margin-top:12px; } .actions { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <header><a class="brand" href="/"><img src="/logo.webp" alt="HCC"><span>HAMRIYAH CRICKET CENTRE</span></a></header>
+  <main>
+    <div id="confirmation-content" hidden>
+      <div class="check" aria-hidden="true">✓</div>
+      <span class="eyebrow">Request received</span>
+      <h1>HCC has your request.</h1>
+      <p class="intro">Your request has been saved. The HCC team will contact you to confirm availability and the final booking details.</p>
+      <section class="card" aria-label="Booking confirmation">
+        <div class="reference">
+          <span class="reference-label">Booking reference</span>
+          <strong class="reference-value" id="confirmation-reference"></strong>
+          <p class="reference-help">Keep this reference. You will need it with your email address to check the booking status.</p>
+        </div>
+        <div class="details">
+          <div class="detail"><span class="detail-label">Request type</span><span class="detail-value" id="confirmation-type"></span></div>
+          <div class="detail"><span class="detail-label">Booking</span><span class="detail-value" id="confirmation-title"></span></div>
+          <div class="detail" id="confirmation-detail-row"><span class="detail-label">Details</span><span class="detail-value" id="confirmation-detail"></span></div>
+        </div>
+        <div class="warning" id="confirmation-warning">Your request is saved, but the staff email notification is delayed. HCC can still see it in the booking dashboard.</div>
+        <div class="actions">
+          <a class="button" href="/booking-status">Check booking status</a>
+          <a class="button secondary" href="/#booking">Make another request</a>
+        </div>
+      </section>
+    </div>
+    <section class="missing" id="confirmation-missing">
+      <h1>No recent request found.</h1>
+      <p class="intro">Submit a booking request first, then this page will show its reference.</p>
+      <a class="button" href="/#booking">Go to booking</a>
+    </section>
+  </main>
+  <script>
+    (function () {
+      var data = null;
+      try { data = JSON.parse(sessionStorage.getItem('hcc-booking-confirmation') || 'null'); } catch (_) {}
+      if (!data && location.hash.length > 1) {
+        try { data = JSON.parse(decodeURIComponent(location.hash.slice(1))); } catch (_) {}
+      }
+      var validReference = data && /^HCC-\\d{8}-[A-Z0-9]{6,12}$/.test(String(data.reference || '').toUpperCase());
+      if (!validReference) {
+        document.getElementById('confirmation-missing').style.display = 'block';
+        return;
+      }
+      document.getElementById('confirmation-reference').textContent = String(data.reference).toUpperCase();
+      document.getElementById('confirmation-type').textContent = String(data.requestType || 'Booking request');
+      document.getElementById('confirmation-title').textContent = String(data.title || 'HCC booking');
+      var detail = String(data.detail || '');
+      document.getElementById('confirmation-detail').textContent = detail;
+      if (!detail) document.getElementById('confirmation-detail-row').hidden = true;
+      if (data.deliveryDelayed) document.getElementById('confirmation-warning').style.display = 'block';
+      document.getElementById('confirmation-content').hidden = false;
+    }());
+  </script>
+</body>
+</html>`);
+}
+
 function sendLegalPage(response, type) {
   const isPrivacy = type === "privacy";
   const title = isPrivacy ? "Privacy Policy" : "Terms of Use";
@@ -1757,6 +1855,11 @@ const server = http.createServer(async (request, response) => {
 
     if (parsed.pathname === "/booking-status" && request.method === "GET") {
       sendBookingStatusPage(response);
+      return;
+    }
+
+    if (parsed.pathname === "/booking-confirmation" && request.method === "GET") {
+      sendBookingConfirmationPage(response);
       return;
     }
 

@@ -4626,17 +4626,24 @@ async function handleFormSubmit(form, e) {
     const result = await response.json().catch(() => ({}));
     if (response.ok) {
       const tournamentName = form.querySelector('#tournament-name-hidden');
-      let confirmMsg = tournamentName && tournamentName.value
-        ? '✅ Registered for ' + tournamentName.value + '! We\'ll contact you within 24 hours.'
-        : '✅ Request sent! We\'ll contact you within 24 hours.';
-      if (result.reference) confirmMsg += ' Reference: ' + result.reference + '.';
-      if (result.deliveryStatus === 'failed') confirmMsg += ' Your request is saved; staff email delivery is delayed.';
-      showToast(confirmMsg);
-      clearFormError(form);
-      form.reset();
-      const resetPhone = form.querySelector('[data-phone-input]');
-      if (resetPhone) updatePhoneInput(resetPhone);
-      if (_tournamentsCache) populateTournamentSelect(_tournamentsCache);
+      const isTournament = data.form_type === 'Tournament Registration';
+      const confirmation = {
+        reference: String(result.reference || ''),
+        requestType: isTournament ? 'Tournament registration' : 'Ground booking',
+        title: isTournament
+          ? String((tournamentName && tournamentName.value) || data.tournament_selection || 'Tournament registration')
+          : String(data.booking_type || 'Ground booking'),
+        detail: isTournament
+          ? 'HCC will contact you about registration and availability.'
+          : [data.booking_date, data.time_slot].filter(Boolean).join(' · '),
+        deliveryDelayed: result.deliveryStatus === 'failed'
+      };
+      const confirmationPath = '/booking-confirmation#' + encodeURIComponent(JSON.stringify(confirmation));
+      try {
+        sessionStorage.setItem('hcc-booking-confirmation', JSON.stringify(confirmation));
+      } catch {}
+      window.location.assign(confirmationPath);
+      return;
     } else {
       showFormError(form, result.error || 'We could not save the request. Please check your details and try again.');
     }

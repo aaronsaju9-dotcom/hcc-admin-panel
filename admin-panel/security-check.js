@@ -106,6 +106,12 @@ async function checkHardenedProduction() {
     const bookingStatusPage = await request(origin, "/booking-status");
     assert.equal(bookingStatusPage.status, 200);
     assert.match(await bookingStatusPage.text(), /id="status-form"/);
+    const bookingConfirmationPage = await request(origin, "/booking-confirmation");
+    assert.equal(bookingConfirmationPage.status, 200);
+    assert.equal(bookingConfirmationPage.headers.get("cache-control"), "no-store");
+    const bookingConfirmationHtml = await bookingConfirmationPage.text();
+    assert.match(bookingConfirmationHtml, /id="confirmation-reference"/);
+    assert.match(bookingConfirmationHtml, /\^HCC-\\d\{8\}/);
 
     for (const pathname of ["/server.js", "/package.json", "/README.md", "/supabase-schema.sql", "/data/content.json", "/.env"]) {
       assert.equal((await request(origin, pathname)).status, 404, `${pathname} must not be public`);
@@ -258,6 +264,8 @@ async function checkExpiringLocalSession() {
     assert.match(siteSource, /data-tournament-action="register"/);
     assert.equal((siteSource.match(/maxlength="24" data-phone-input/g) || []).length, 2);
     assert.match(siteSource, /Phone number must contain 7 to 15 digits/);
+    assert.match(siteSource, /sessionStorage\.setItem\('hcc-booking-confirmation'/);
+    assert.match(siteSource, /window\.location\.assign\(confirmationPath\)/);
     assert.doesNotMatch(siteSource, /onclick="openTournament(?:Modal|Registration)\([^)]*escAttr/);
   });
 }
