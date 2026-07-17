@@ -591,6 +591,15 @@
   .form-group input.form-field-error, .form-group select.form-field-error, .form-group textarea.form-field-error {
     border-color: #d97706; box-shadow: 0 0 0 3px rgba(217,119,6,0.12);
   }
+  .form-help {
+    display: flex; justify-content: space-between; gap: 12px;
+    color: var(--mid); font-size: 0.78rem; line-height: 1.4;
+  }
+  .phone-digit-count { white-space: nowrap; font-weight: 600; }
+  .phone-digit-count.at-limit { color: #8a4300; }
+  .form-field-inline-error {
+    color: #8a4300; font-size: 0.8rem; font-weight: 600; line-height: 1.4;
+  }
   .form-group textarea { resize: vertical; min-height: 120px; }
   .form-submit { margin-top: 32px; text-align: center; }
   .form-submit button {
@@ -3193,8 +3202,11 @@
             <input type="text" name="fullname" placeholder="Your name" required>
           </div>
           <div class="form-group">
-            <label>Phone Number</label>
-            <input type="tel" name="phone" placeholder="+971 XX XXX XXXX" required>
+            <label for="slot-phone">Phone Number (7–15 digits)</label>
+            <input type="tel" id="slot-phone" name="phone" placeholder="+971 XX XXX XXXX"
+              inputmode="tel" autocomplete="tel" maxlength="24" data-phone-input
+              aria-describedby="slot-phone-help" required>
+            <small class="form-help" id="slot-phone-help"><span>Country code and spaces are allowed.</span><span class="phone-digit-count">0/15 digits</span></small>
           </div>
           <div class="form-group">
             <label>Email Address</label>
@@ -3260,8 +3272,11 @@
             <input type="text" name="captain_name" placeholder="Captain's full name" required>
           </div>
           <div class="form-group">
-            <label>Phone Number</label>
-            <input type="tel" name="phone" placeholder="+971 XX XXX XXXX" required>
+            <label for="tournament-phone">Phone Number (7–15 digits)</label>
+            <input type="tel" id="tournament-phone" name="phone" placeholder="+971 XX XXX XXXX"
+              inputmode="tel" autocomplete="tel" maxlength="24" data-phone-input
+              aria-describedby="tournament-phone-help" required>
+            <small class="form-help" id="tournament-phone-help"><span>Country code and spaces are allowed.</span><span class="phone-digit-count">0/15 digits</span></small>
           </div>
           <div class="form-group">
             <label>Email Address</label>
@@ -4516,6 +4531,7 @@ function clearFormError(form) {
     field.classList.remove('form-field-error');
     field.removeAttribute('aria-invalid');
   });
+  form.querySelectorAll('.form-field-inline-error').forEach(message => message.remove());
 }
 
 function showFormError(form, message, fieldName) {
@@ -4529,7 +4545,34 @@ function showFormError(form, message, fieldName) {
   if (field && typeof field.focus === 'function') {
     field.classList.add('form-field-error');
     field.setAttribute('aria-invalid', 'true');
+    const fieldGroup = field.closest('.form-group');
+    if (fieldGroup) {
+      const inlineError = document.createElement('small');
+      inlineError.className = 'form-field-inline-error';
+      inlineError.setAttribute('role', 'alert');
+      inlineError.textContent = message;
+      fieldGroup.appendChild(inlineError);
+    }
     field.focus();
+  }
+}
+
+function updatePhoneInput(input) {
+  const maxDigits = 15;
+  let digitCount = 0;
+  let limitedValue = '';
+  for (const character of input.value) {
+    if (/\d/.test(character)) {
+      if (digitCount >= maxDigits) continue;
+      digitCount += 1;
+    }
+    limitedValue += character;
+  }
+  if (limitedValue !== input.value) input.value = limitedValue;
+  const counter = input.parentElement && input.parentElement.querySelector('.phone-digit-count');
+  if (counter) {
+    counter.textContent = digitCount + '/15 digits';
+    counter.classList.toggle('at-limit', digitCount === maxDigits);
   }
 }
 
@@ -4549,8 +4592,11 @@ function validateBookingForm(data) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
     return { message: 'Please enter a valid email address.', field: 'email' };
   }
-  if (!/^\+?[\d\s().-]+$/.test(phone) || phoneDigits.length < 7 || phoneDigits.length > 15) {
-    return { message: 'Please enter a valid phone number using numbers only. You may also use +, spaces, brackets, dots or hyphens.', field: 'phone' };
+  if (!/^\+?[\d\s().-]+$/.test(phone)) {
+    return { message: 'Use numbers only. You may also use +, spaces, brackets, dots or hyphens.', field: 'phone' };
+  }
+  if (phoneDigits.length < 7 || phoneDigits.length > 15) {
+    return { message: 'Phone number must contain 7 to 15 digits.', field: 'phone' };
   }
   if (data.form_type === 'Slot Booking' && !/^\d{4}-\d{2}-\d{2}$/.test(String(data.booking_date || ''))) {
     return { message: 'Please select a booking date.', field: 'booking_date' };
@@ -4588,6 +4634,8 @@ async function handleFormSubmit(form, e) {
       showToast(confirmMsg);
       clearFormError(form);
       form.reset();
+      const resetPhone = form.querySelector('[data-phone-input]');
+      if (resetPhone) updatePhoneInput(resetPhone);
       if (_tournamentsCache) populateTournamentSelect(_tournamentsCache);
     } else {
       showFormError(form, result.error || 'We could not save the request. Please check your details and try again.');
@@ -4812,6 +4860,7 @@ if (statsSection) counterObs.observe(statsSection);
   form.addEventListener('submit', (event) => handleFormSubmit(form, event));
   form.addEventListener('input', (event) => {
     const field = event.target;
+    if (field.matches && field.matches('[data-phone-input]')) updatePhoneInput(field);
     if (!field.classList || !field.classList.contains('form-field-error')) return;
     field.classList.remove('form-field-error');
     field.removeAttribute('aria-invalid');
@@ -4820,6 +4869,7 @@ if (statsSection) counterObs.observe(statsSection);
       errorBox.textContent = '';
       errorBox.hidden = true;
     }
+    form.querySelectorAll('.form-field-inline-error').forEach(message => message.remove());
   });
 });
 /* ─── TOURNAMENT SELECT → BANNER SYNC ─── */

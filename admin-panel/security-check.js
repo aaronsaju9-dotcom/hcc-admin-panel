@@ -156,6 +156,20 @@ async function checkHardenedProduction() {
     });
     assert.equal(invalidBooking.status, 400);
 
+    const overlongPhone = await request(origin, "/api/form-submit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: origin },
+      body: JSON.stringify({
+        form_type: "Slot Booking",
+        fullname: "Test User",
+        phone: "+9715012345678901",
+        email: "test@example.com",
+        booking_date: "2026-07-20"
+      })
+    });
+    assert.equal(overlongPhone.status, 400);
+    assert.match((await overlongPhone.json()).error, /7 to 15 digits/);
+
     const missingEmail = await request(origin, "/api/form-submit", {
       method: "POST",
       headers: { "Content-Type": "application/json", Origin: origin },
@@ -242,6 +256,8 @@ async function checkExpiringLocalSession() {
 
     const siteSource = fs.readFileSync(path.join(ROOT, "site.html"), "utf8");
     assert.match(siteSource, /data-tournament-action="register"/);
+    assert.equal((siteSource.match(/maxlength="24" data-phone-input/g) || []).length, 2);
+    assert.match(siteSource, /Phone number must contain 7 to 15 digits/);
     assert.doesNotMatch(siteSource, /onclick="openTournament(?:Modal|Registration)\([^)]*escAttr/);
   });
 }

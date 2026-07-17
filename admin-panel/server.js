@@ -790,8 +790,11 @@ function normalizeFormSubmission(payload) {
     throw new ValidationError("Required form details are missing.");
   }
   const phoneDigits = cleanPayload.phone.replace(/\D/g, "");
-  if (!/^\+?[\d\s().-]+$/.test(cleanPayload.phone) || phoneDigits.length < 7 || phoneDigits.length > 15) {
-    throw new ValidationError("Enter a valid phone number.");
+  if (!/^\+?[\d\s().-]+$/.test(cleanPayload.phone)) {
+    throw new ValidationError("Use a valid phone number containing numbers and standard phone punctuation only.");
+  }
+  if (phoneDigits.length < 7 || phoneDigits.length > 15) {
+    throw new ValidationError("Phone number must contain 7 to 15 digits.");
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(cleanPayload.email)) {
     throw new ValidationError("Enter a valid email address.");
