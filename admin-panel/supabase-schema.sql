@@ -68,6 +68,9 @@ create table if not exists public.hcc_admin_audit (
   ip text
 );
 
+create index if not exists hcc_admin_audit_created_at_idx on public.hcc_admin_audit (created_at desc);
+create index if not exists hcc_admin_audit_rate_limit_idx on public.hcc_admin_audit (action, ip, created_at desc);
+
 alter table public.hcc_admin_audit enable row level security;
 
 drop policy if exists "service role manages hcc audit" on public.hcc_admin_audit;

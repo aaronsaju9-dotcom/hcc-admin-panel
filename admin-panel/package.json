@@ -7,10 +7,11 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
+    "test": "npm run check && npm run test:security",
     "check": "node --check server.js && node --check admin.js && node --check security-check.js",
     "test:security": "node security-check.js"
   },
   "engines": {
-    "node": ">=24 <25"
+    "node": ">=24.18 <25"
   }
 }

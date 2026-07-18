@@ -105,6 +105,16 @@ let cachedUploads = {
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
+function apiFetch(url, options = {}) {
+  const method = String(options.method || "GET").toUpperCase();
+  const headers = new Headers(options.headers || {});
+  if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+    if (!sessionInfo?.csrfToken) throw new Error("Your admin session has expired. Sign in again.");
+    headers.set("X-HCC-CSRF", sessionInfo.csrfToken);
+  }
+  return fetch(url, { ...options, headers });
+}
+
 function clearElement(element) {
   if (element) element.replaceChildren();
 }
@@ -132,6 +142,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   bindToolbar();
   bindFileInputs();
   await loadSession();
+  $$('[data-logout]').forEach((button) => button.addEventListener("click", logout));
   await loadData();
   await loadBookings();
   await loadAuditEntries();
@@ -141,7 +152,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 async function loadSession() {
   try {
-    const response = await fetch(API_SESSION_URL, { cache: "no-store" });
+    const response = await apiFetch(API_SESSION_URL, { cache: "no-store" });
     if (!response.ok) throw new Error("Session unavailable");
     sessionInfo = await response.json();
   } catch {
@@ -150,9 +161,17 @@ async function loadSession() {
   renderSessionStatus();
 }
 
+async function logout() {
+  try {
+    await apiFetch("/logout", { method: "POST" });
+  } finally {
+    window.location.assign("/login");
+  }
+}
+
 async function loadData() {
   try {
-    const response = await fetch(API_CONTENT_URL, { cache: "no-store" });
+    const response = await apiFetch(API_CONTENT_URL, { cache: "no-store" });
     if (!response.ok) throw new Error("Content API unavailable");
     data = mergeDefaults(await response.json());
   } catch {
@@ -163,7 +182,7 @@ async function loadData() {
 
 async function loadAuditEntries() {
   try {
-    const response = await fetch(API_AUDIT_URL, { cache: "no-store" });
+    const response = await apiFetch(API_AUDIT_URL, { cache: "no-store" });
     if (!response.ok) throw new Error("Audit API unavailable");
     const result = await response.json();
     auditEntries = Array.isArray(result.entries) ? result.entries : [];
@@ -174,7 +193,7 @@ async function loadAuditEntries() {
 
 async function loadBookings({ notify = false } = {}) {
   try {
-    const response = await fetch(API_BOOKINGS_URL, { cache: "no-store" });
+    const response = await apiFetch(API_BOOKINGS_URL, { cache: "no-store" });
     if (!response.ok) throw new Error("Bookings API unavailable");
     const result = await response.json();
     bookings = Array.isArray(result.bookings) ? result.bookings : [];
@@ -219,7 +238,7 @@ function loadActivity() {
 }
 
 async function saveData(message) {
-  const response = await fetch(API_CONTENT_URL, {
+  const response = await apiFetch(API_CONTENT_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data)
@@ -382,7 +401,7 @@ function bindImageInput(inputSelector, cacheKey, previewSelector, context) {
 async function deleteCloudinaryImage(publicId) {
   if (!publicId) return;
   try {
-    const response = await fetch(API_CLOUDINARY_DELETE_URL, {
+    const response = await apiFetch(API_CLOUDINARY_DELETE_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ publicId })
@@ -414,7 +433,7 @@ function readFileAsDataUrl(file) {
 }
 
 async function uploadImage(fileData, filename, context) {
-  const response = await fetch(API_UPLOAD_URL, {
+  const response = await apiFetch(API_UPLOAD_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ file: fileData, filename, context })
@@ -630,7 +649,7 @@ async function updatePassword(event) {
     return;
   }
 
-  const response = await fetch(API_PASSWORD_UPDATE_URL, {
+  const response = await apiFetch(API_PASSWORD_UPDATE_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ currentPassword, newPassword })
@@ -641,7 +660,7 @@ async function updatePassword(event) {
     return;
   }
   $("#passwordForm").reset();
-  toast("Password updated.");
+  window.location.assign("/login");
 }
 
 async function sendResetEmail(event) {
@@ -651,7 +670,7 @@ async function sendResetEmail(event) {
     toast("Enter the admin email.");
     return;
   }
-  const response = await fetch(API_PASSWORD_RESET_URL, {
+  const response = await apiFetch(API_PASSWORD_RESET_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email })
@@ -1214,7 +1233,7 @@ async function updateBookingFromCard(reference, status, adminNote, button) {
   button.disabled = true;
   button.textContent = "Saving…";
   try {
-    const response = await fetch(`${API_BOOKINGS_URL}/${encodeURIComponent(reference)}`, {
+    const response = await apiFetch(`${API_BOOKINGS_URL}/${encodeURIComponent(reference)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status, admin_note: adminNote })
@@ -1238,7 +1257,7 @@ async function deleteBookingFromCard(reference, button) {
   button.disabled = true;
   button.textContent = "Deleting…";
   try {
-    const response = await fetch(`${API_BOOKINGS_URL}/${encodeURIComponent(reference)}`, { method: "DELETE" });
+    const response = await apiFetch(`${API_BOOKINGS_URL}/${encodeURIComponent(reference)}`, { method: "DELETE" });
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result.error || "Booking deletion failed.");
     bookings = bookings.filter((item) => item.reference !== reference);

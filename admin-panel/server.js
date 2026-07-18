@@ -2,6 +2,7 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const net = require("net");
 
 const PORT = Number(process.env.PORT || 8765);
 const ROOT = path.resolve(__dirname);
@@ -14,6 +15,7 @@ const ADMIN_USER = process.env.ADMIN_USER || "admin";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
 const SESSION_SECRET = process.env.SESSION_SECRET || (IS_PRODUCTION ? "" : crypto.randomBytes(32).toString("hex"));
 const SESSION_COOKIE = "hcc_admin_session";
+const MFA_PENDING_COOKIE = "hcc_mfa_pending";
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/$/, "");
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
@@ -22,6 +24,7 @@ const SUPABASE_AUDIT_TABLE = process.env.SUPABASE_AUDIT_TABLE || "hcc_admin_audi
 const SUPABASE_BOOKINGS_TABLE = process.env.SUPABASE_BOOKINGS_TABLE || "hcc_bookings";
 const CONTENT_RECORD_ID = process.env.CONTENT_RECORD_ID || "main";
 const SUPABASE_AUTH_ENABLED = process.env.SUPABASE_AUTH_ENABLED === "true";
+const SUPABASE_MFA_REQUIRED = process.env.SUPABASE_MFA_REQUIRED !== "false";
 const ALLOW_LOCAL_ADMIN = process.env.ALLOW_LOCAL_ADMIN === "true";
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
   .split(",")
@@ -32,14 +35,24 @@ const CLOUDINARY_API_KEY = process.env.CLOUDINARY_API_KEY || "";
 const CLOUDINARY_API_SECRET = process.env.CLOUDINARY_API_SECRET || "";
 const CLOUDINARY_FOLDER = process.env.CLOUDINARY_FOLDER || "hcc-website";
 const FORMSPREE_ENDPOINT = process.env.FORMSPREE_ENDPOINT || "";
-const BOOKING_RETENTION_DAYS_VALUE = Number(process.env.BOOKING_RETENTION_DAYS || 0);
+const BOOKING_RETENTION_DAYS_VALUE = Number(process.env.BOOKING_RETENTION_DAYS || 180);
 const BOOKING_RETENTION_DAYS = Number.isFinite(BOOKING_RETENTION_DAYS_VALUE) ? Math.floor(Math.max(0, BOOKING_RETENTION_DAYS_VALUE)) : 0;
+const BOOKING_PURGE_INTERVAL_HOURS_VALUE = Number(process.env.BOOKING_PURGE_INTERVAL_HOURS || 6);
+const BOOKING_PURGE_INTERVAL_MS = Math.max(1, Number.isFinite(BOOKING_PURGE_INTERVAL_HOURS_VALUE) ? BOOKING_PURGE_INTERVAL_HOURS_VALUE : 6) * 60 * 60 * 1000;
 const TRUST_PROXY = process.env.TRUST_PROXY === "true";
 const PUBLIC_ORIGIN = parseOrigin(process.env.PUBLIC_ORIGIN || "");
-const SESSION_TTL_MS = Math.max(1, Number(process.env.ADMIN_SESSION_HOURS || 8)) * 60 * 60 * 1000;
-const MAX_JSON_BYTES = 30 * 1024 * 1024;
+const SESSION_TTL_MS = Math.max(0.25, Number(process.env.ADMIN_SESSION_HOURS || 1)) * 60 * 60 * 1000;
+const MFA_PENDING_TTL_MS = 10 * 60 * 1000;
+const MAX_FORM_BYTES = 8 * 1024;
+const MAX_JSON_BYTES = 64 * 1024;
+const MAX_CONTENT_BYTES = 1024 * 1024;
+const MAX_UPLOAD_BODY_BYTES = 12 * 1024 * 1024;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_CONCURRENT_BODY_READS = 100;
+const PROVIDER_TIMEOUT_MS = 10 * 1000;
 const rateLimits = new Map();
+const revokedSessionIds = new Map();
+let activeBodyReads = 0;
 
 class ValidationError extends Error {
   constructor(message) {
@@ -76,6 +89,12 @@ function validateStartupConfig() {
   if (ALLOW_LOCAL_ADMIN && !ADMIN_PASSWORD) {
     issues.push("ADMIN_PASSWORD must be configured when ALLOW_LOCAL_ADMIN=true.");
   }
+  if (IS_PRODUCTION && BOOKING_RETENTION_DAYS < 1) {
+    issues.push("BOOKING_RETENTION_DAYS must be at least 1 in production.");
+  }
+  if (IS_PRODUCTION && SUPABASE_AUTH_ENABLED && !SUPABASE_MFA_REQUIRED) {
+    issues.push("SUPABASE_MFA_REQUIRED must remain enabled in production.");
+  }
   if (issues.length) {
     throw new Error(issues.join(" "));
   }
@@ -89,11 +108,14 @@ function getProductionReadinessIssues() {
   if (localAdminEnabled()) issues.push("local-admin-enabled");
   if (!hasCloudinaryConfig()) issues.push("cloudinary");
   if (!FORMSPREE_ENDPOINT) issues.push("formspree");
+  if (BOOKING_RETENTION_DAYS < 1) issues.push("booking-retention");
+  if (!SUPABASE_MFA_REQUIRED) issues.push("supabase-mfa");
   return issues;
 }
 
 const publicFiles = new Map([
   ["/site.html", path.resolve(ROOT, "site.html")],
+  ["/site.js", path.resolve(ROOT, "site.js")],
   ["/logo.webp", path.resolve(ROOT, "logo.webp")],
   ["/hero-bg-cricket.webp", path.resolve(ROOT, "hero-bg-cricket.webp")],
   ["/hero-cricket.mp4", path.resolve(ROOT, "hero-cricket.mp4")],
@@ -101,7 +123,10 @@ const publicFiles = new Map([
   ["/gallery-local-2.webp", path.resolve(ROOT, "gallery-local-2.webp")],
   ["/index.html", path.resolve(ROOT, "index.html")],
   ["/admin.css", path.resolve(ROOT, "admin.css")],
-  ["/admin.js", path.resolve(ROOT, "admin.js")]
+  ["/admin.js", path.resolve(ROOT, "admin.js")],
+  ["/reset-password.js", path.resolve(ROOT, "reset-password.js")],
+  ["/booking-status.js", path.resolve(ROOT, "booking-status.js")],
+  ["/booking-confirmation.js", path.resolve(ROOT, "booking-confirmation.js")]
 ]);
 
 const mimeTypes = {
@@ -216,6 +241,23 @@ function normalizeContent(content) {
   };
 }
 
+const PUBLIC_CONTENT_FIELDS = {
+  tournaments: new Set(["id", "name", "status", "date", "prize", "registration", "description", "rules", "registerLink", "cricLink", "tournamentLink", "poster", "published", "featured", "order"]),
+  images: new Set(["id", "title", "placement", "alt", "src", "published", "featured", "order"]),
+  socials: new Set(["id", "platform", "label", "url", "visible", "published", "featured", "order"]),
+  testimonials: new Set(["id", "name", "role", "text", "rating", "avatar", "published", "featured", "order"])
+};
+
+function projectPublicContent(content) {
+  const normalized = normalizeContent(content);
+  return Object.fromEntries(Object.entries(PUBLIC_CONTENT_FIELDS).map(([collection, allowedFields]) => [
+    collection,
+    normalized[collection]
+      .filter((item) => item.published !== false)
+      .map((item) => Object.fromEntries(Object.entries(item).filter(([key]) => allowedFields.has(key))))
+  ]));
+}
+
 const CONTENT_URL_FIELDS = new Set(["registerLink", "cricLink", "tournamentLink", "url"]);
 const CONTENT_IMAGE_FIELDS = new Set(["src", "poster", "image", "avatar"]);
 const BLOCKED_CONTENT_KEYS = new Set(["__proto__", "constructor", "prototype"]);
@@ -265,13 +307,24 @@ function normalizeItems(items, collection = "items") {
 
 function getClientIp(request) {
   if (TRUST_PROXY && request.headers["x-forwarded-for"]) {
-    return String(request.headers["x-forwarded-for"]).split(",")[0].trim();
+    const forwarded = String(request.headers["x-forwarded-for"])
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    const trustedBoundaryAddress = forwarded.at(-1) || "";
+    if (net.isIP(trustedBoundaryAddress)) return trustedBoundaryAddress;
   }
   return request.socket.remoteAddress || "unknown";
 }
 
-function checkRateLimit(request, bucket, limit, windowMs) {
-  const key = `${bucket}:${getClientIp(request)}`;
+function makeRateLimitSubject(value) {
+  const clean = String(value || "").trim().toLowerCase();
+  return clean ? crypto.createHash("sha256").update(clean).digest("hex").slice(0, 32) : "";
+}
+
+function checkRateLimit(request, bucket, limit, windowMs, subject = "") {
+  const subjectKey = makeRateLimitSubject(subject);
+  const key = `${bucket}:${getClientIp(request)}${subjectKey ? `:${subjectKey}` : ""}`;
   const now = Date.now();
   if (!rateLimits.has(key) && rateLimits.size >= 10000) {
     for (const [storedKey, storedEntry] of rateLimits) {
@@ -293,6 +346,37 @@ function checkRateLimit(request, bucket, limit, windowMs) {
   return entry.count <= limit;
 }
 
+async function checkSharedRateLimit(request, bucket, limit, windowMs, subject = "") {
+  if (!checkRateLimit(request, bucket, limit, windowMs, subject)) return false;
+  if (!hasSupabaseConfig()) return true;
+
+  const action = `rate-limit.${bucket}`;
+  const subjectKey = makeRateLimitSubject(subject);
+  const address = subjectKey ? `subject:${subjectKey}` : getClientIp(request);
+  const cutoff = new Date(Date.now() - windowMs).toISOString();
+  const entry = {
+    id: `rate-${Date.now().toString(36)}-${crypto.randomBytes(5).toString("hex")}`,
+    created_at: new Date().toISOString(),
+    actor: "rate-limiter",
+    action,
+    detail: {},
+    ip: address
+  };
+
+  try {
+    await supabaseRequest(SUPABASE_AUDIT_TABLE, {
+      method: "POST",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify(entry)
+    });
+    const rows = await supabaseRequest(`${SUPABASE_AUDIT_TABLE}?action=eq.${encodeURIComponent(action)}&ip=eq.${encodeURIComponent(address)}&created_at=gte.${encodeURIComponent(cutoff)}&select=id&limit=${limit + 1}`);
+    return Array.isArray(rows) && rows.length <= limit;
+  } catch (error) {
+    console.error(`Shared rate limiter unavailable for ${bucket}:`, error.message || error);
+    return !/^(?:login|mfa|password-reset|password-update-token|booking-status)/.test(bucket);
+  }
+}
+
 function commonHeaders(extra = {}) {
   const contentSecurityPolicy = [
     "default-src 'self'",
@@ -300,7 +384,8 @@ function commonHeaders(extra = {}) {
     "object-src 'none'",
     "frame-ancestors 'none'",
     "form-action 'self'",
-    "script-src 'self' 'unsafe-inline'",
+    "script-src 'self'",
+    "script-src-attr 'none'",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data: blob: https:",
@@ -359,8 +444,14 @@ function writeLocalContent(content) {
   return normalized;
 }
 
+function fetchWithTimeout(url, options = {}, timeoutMs = PROVIDER_TIMEOUT_MS) {
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const signal = options.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal;
+  return fetch(url, { ...options, redirect: "error", signal });
+}
+
 async function supabaseRequest(pathname, options = {}) {
-  const response = await fetch(`${SUPABASE_URL}/rest/v1/${pathname}`, {
+  const response = await fetchWithTimeout(`${SUPABASE_URL}/rest/v1/${pathname}`, {
     ...options,
     headers: {
       apikey: SUPABASE_SERVICE_ROLE_KEY,
@@ -371,12 +462,18 @@ async function supabaseRequest(pathname, options = {}) {
   });
 
   if (!response.ok) {
-    const detail = await response.text();
+    const detail = (await response.text()).replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, 500);
     throw new Error(`Supabase ${response.status}: ${detail}`);
   }
 
   if (response.status === 204) return null;
-  return response.json();
+  const body = await response.text();
+  if (!body) return null;
+  try {
+    return JSON.parse(body);
+  } catch {
+    throw new Error("Supabase returned an invalid JSON response.");
+  }
 }
 
 async function readSupabaseContent() {
@@ -481,6 +578,24 @@ async function purgeExpiredBookings() {
   return rows.length - kept.length;
 }
 
+function startMaintenanceJobs() {
+  const sweep = async () => {
+    try {
+      const deletedBookings = await purgeExpiredBookings();
+      const deletedRateEvents = await purgeExpiredRateLimitEvents();
+      if (deletedBookings || deletedRateEvents) {
+        console.log(`Maintenance removed ${deletedBookings} expired booking(s) and ${deletedRateEvents} rate-limit event(s).`);
+      }
+    } catch (error) {
+      console.error("Scheduled retention sweep failed:", error.message || error);
+    }
+  };
+  const initialSweep = setTimeout(sweep, 1000);
+  initialSweep.unref();
+  const interval = setInterval(sweep, BOOKING_PURGE_INTERVAL_MS);
+  interval.unref();
+}
+
 async function createBooking(payload) {
   const now = new Date().toISOString();
   const booking = {
@@ -566,10 +681,25 @@ function writeLocalAudit(rows) {
 async function readAuditLog() {
   if (!hasSupabaseConfig()) return readLocalAudit();
   try {
-    const rows = await supabaseRequest(`${SUPABASE_AUDIT_TABLE}?select=*&order=created_at.desc&limit=100`);
+    const rows = await supabaseRequest(`${SUPABASE_AUDIT_TABLE}?action=not.like.rate-limit.*&select=*&order=created_at.desc&limit=100`);
     return Array.isArray(rows) ? rows : [];
   } catch {
     return readLocalAudit();
+  }
+}
+
+async function purgeExpiredRateLimitEvents() {
+  if (!hasSupabaseConfig()) return 0;
+  const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+  try {
+    const rows = await supabaseRequest(`${SUPABASE_AUDIT_TABLE}?action=like.rate-limit.*&created_at=lt.${encodeURIComponent(cutoff)}`, {
+      method: "DELETE",
+      headers: { Prefer: "return=representation" }
+    });
+    return Array.isArray(rows) ? rows.length : 0;
+  } catch (error) {
+    console.error("Rate-limit event cleanup failed:", error.message || error);
+    return 0;
   }
 }
 
@@ -616,7 +746,8 @@ function sendJson(response, status, payload, extraHeaders = {}) {
   response.end(JSON.stringify(payload, null, 2));
 }
 
-function getStaticCacheControl(extname) {
+function getStaticCacheControl(extname, protectedAsset = false) {
+  if (protectedAsset) return "private, no-store";
   if ([".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".mp4"].includes(extname)) {
     return "public, max-age=31536000, immutable";
   }
@@ -655,7 +786,9 @@ async function uploadImageToCloudinary({ file, filename, context }) {
   }
 
   const timestamp = Math.floor(Date.now() / 1000);
-  const folder = `${CLOUDINARY_FOLDER}/${context || "uploads"}`;
+  const allowedContexts = new Set(["tournaments", "gallery", "testimonials", "uploads"]);
+  const cleanContext = allowedContexts.has(String(context || "")) ? String(context) : "uploads";
+  const folder = `${CLOUDINARY_FOLDER}/${cleanContext}`;
   const publicId = String(filename || `image-${Date.now()}`)
     .replace(/\.[a-z0-9]+$/i, "")
     .replace(/[^a-z0-9_-]+/gi, "-")
@@ -672,7 +805,7 @@ async function uploadImageToCloudinary({ file, filename, context }) {
   form.append("public_id", publicId);
   form.append("signature", signature);
 
-  const uploadResponse = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`, {
+  const uploadResponse = await fetchWithTimeout(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`, {
     method: "POST",
     body: form
   });
@@ -699,9 +832,13 @@ function estimateDataUrlBytes(dataUrl) {
 }
 
 async function deleteCloudinaryImage(publicId) {
-  if (!hasCloudinaryConfig()) return { ok: true, skipped: true };
   const cleanPublicId = String(publicId || "").trim();
   if (!cleanPublicId) return { ok: true, skipped: true };
+  const folderPrefix = `${CLOUDINARY_FOLDER}/`;
+  if (cleanPublicId.length > 240 || !/^[a-z0-9_/-]+$/i.test(cleanPublicId) || !cleanPublicId.startsWith(folderPrefix) || cleanPublicId.includes("..")) {
+    throw new ValidationError("Invalid HCC image identifier.");
+  }
+  if (!hasCloudinaryConfig()) return { ok: true, skipped: true };
 
   const timestamp = Math.floor(Date.now() / 1000);
   const signatureParams = { public_id: cleanPublicId, timestamp };
@@ -712,7 +849,7 @@ async function deleteCloudinaryImage(publicId) {
   form.append("timestamp", String(timestamp));
   form.append("signature", signature);
 
-  const destroyResponse = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/destroy`, {
+  const destroyResponse = await fetchWithTimeout(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/destroy`, {
     method: "POST",
     body: form
   });
@@ -739,7 +876,7 @@ async function forwardFormSubmission(payload) {
   };
 
   try {
-    const response = await fetch(FORMSPREE_ENDPOINT, {
+    const response = await fetchWithTimeout(FORMSPREE_ENDPOINT, {
       method: "POST",
       headers: {
         Accept: "application/json",
@@ -825,14 +962,60 @@ function signSession(value) {
     .digest("hex");
 }
 
-function makeSessionObjectValue(session) {
+function sealSecret(value) {
+  const iv = crypto.randomBytes(12);
+  const key = crypto.createHash("sha256").update(`${SESSION_SECRET}:hcc-session-encryption`).digest();
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([cipher.update(String(value || ""), "utf8"), cipher.final()]);
+  return `${iv.toString("base64url")}.${cipher.getAuthTag().toString("base64url")}.${encrypted.toString("base64url")}`;
+}
+
+function unsealSecret(value) {
+  try {
+    const [ivPart, tagPart, encryptedPart] = String(value || "").split(".");
+    if (!ivPart || !tagPart || !encryptedPart) return "";
+    const key = crypto.createHash("sha256").update(`${SESSION_SECRET}:hcc-session-encryption`).digest();
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(ivPart, "base64url"));
+    decipher.setAuthTag(Buffer.from(tagPart, "base64url"));
+    return Buffer.concat([decipher.update(Buffer.from(encryptedPart, "base64url")), decipher.final()]).toString("utf8");
+  } catch {
+    return "";
+  }
+}
+
+function decodeJwtPayload(token) {
+  try {
+    const parts = String(token || "").split(".");
+    if (parts.length !== 3) return null;
+    return JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function makeSessionObjectValue(session, ttlMs = SESSION_TTL_MS, maximumExpiry = Infinity) {
   const issuedAt = Date.now();
   const payload = Buffer.from(JSON.stringify({
     ...session,
     issuedAt,
-    expiresAt: issuedAt + SESSION_TTL_MS
+    expiresAt: Math.min(issuedAt + ttlMs, maximumExpiry)
   })).toString("base64url");
   return `${payload}.${signSession(payload)}`;
+}
+
+function parseSignedObject(value) {
+  const separator = String(value || "").indexOf(".");
+  if (separator === -1) return null;
+  const payload = value.slice(0, separator);
+  const signature = value.slice(separator + 1);
+  if (!timingSafeEqual(signature, signSession(payload))) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    if (!Number.isFinite(parsed.expiresAt) || Date.now() >= parsed.expiresAt) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
 function localAdminEnabled() {
@@ -869,34 +1052,78 @@ function isBasicAuthorized(request) {
   }
 }
 
-function isCookieAuthorized(request) {
-  return Boolean(getSession(request));
-}
-
 function getSession(request) {
   const cookie = parseCookies(request)[SESSION_COOKIE];
   if (!cookie) return null;
-  const separator = cookie.indexOf(".");
-  if (separator === -1) return null;
-  const payload = cookie.slice(0, separator);
-  const signature = cookie.slice(separator + 1);
-  if (timingSafeEqual(signature, signSession(payload))) {
-    try {
-      const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
-      const identity = String(session.identity || "");
-      if (!Number.isFinite(session.expiresAt) || Date.now() >= session.expiresAt) return null;
-      const allowedIdentity = identity === ADMIN_USER || (ADMIN_EMAILS.length > 0 && ADMIN_EMAILS.includes(identity.toLowerCase()));
-      if (identity === ADMIN_USER && !localAdminEnabled()) return null;
-      return allowedIdentity ? session : null;
-    } catch {
-      return null;
-    }
-  }
-  return null;
+  const session = parseSignedObject(cookie);
+  if (!session) return null;
+  const identity = String(session.identity || "");
+  const allowedIdentity = identity === ADMIN_USER || (ADMIN_EMAILS.length > 0 && ADMIN_EMAILS.includes(identity.toLowerCase()));
+  if (identity === ADMIN_USER && !localAdminEnabled()) return null;
+  return allowedIdentity ? session : null;
 }
 
-function isAuthorized(request) {
-  return isCookieAuthorized(request) || isBasicAuthorized(request);
+function getPendingMfaSession(request) {
+  const pending = parseSignedObject(parseCookies(request)[MFA_PENDING_COOKIE]);
+  if (!pending || pending.provider !== "supabase" || !pending.identity || !pending.accessToken) return null;
+  if (ADMIN_EMAILS.length === 0 || !ADMIN_EMAILS.includes(String(pending.identity).toLowerCase())) return null;
+  return pending;
+}
+
+async function fetchSupabaseUser(accessToken) {
+  const response = await fetchWithTimeout(`${SUPABASE_URL}/auth/v1/user`, {
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${accessToken}`
+    }
+  });
+  const payload = await response.json().catch(() => ({}));
+  return response.ok && payload && payload.email ? payload : null;
+}
+
+async function validateSupabaseSession(session) {
+  if (!hasSupabaseAuthConfig() || session.provider !== "supabase") return null;
+  const accessToken = unsealSecret(session.accessToken);
+  const claims = decodeJwtPayload(accessToken);
+  if (!accessToken || !claims || (SUPABASE_MFA_REQUIRED && claims.aal !== "aal2")) return null;
+  const sessionId = String(claims.session_id || "");
+  const revokedUntil = revokedSessionIds.get(sessionId) || 0;
+  if (revokedUntil > Date.now()) return null;
+  if (revokedUntil) revokedSessionIds.delete(sessionId);
+  const user = await fetchSupabaseUser(accessToken);
+  if (!user) return null;
+  const email = String(user.email || "").toLowerCase();
+  if (email !== String(session.identity || "").toLowerCase() || ADMIN_EMAILS.length === 0 || !ADMIN_EMAILS.includes(email)) return null;
+  if (!session.userId || String(user.id || "") !== String(session.userId) || String(claims.sub || "") !== String(session.userId)) return null;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(claims.session_id || ""))) return null;
+  if (SUPABASE_MFA_REQUIRED && (!Array.isArray(user.factors) || !user.factors.some((factor) => factor?.factor_type === "totp" && factor?.status === "verified"))) return null;
+  if (session.userUpdatedAt && user.updated_at && session.userUpdatedAt !== user.updated_at) return null;
+  return { ...session, accessTokenPlaintext: accessToken };
+}
+
+async function isAuthorized(request) {
+  if (request.hccAuthChecked) return Boolean(request.hccSession);
+  request.hccAuthChecked = true;
+  const session = getSession(request);
+  if (session?.provider === "supabase") {
+    try {
+      request.hccSession = await validateSupabaseSession(session);
+    } catch (error) {
+      console.error("Supabase session validation failed:", error.message || error);
+      request.hccSession = null;
+    }
+    return Boolean(request.hccSession);
+  }
+  if (session?.provider === "local") {
+    request.hccSession = session;
+    return true;
+  }
+  if (isBasicAuthorized(request)) {
+    request.hccSession = { identity: ADMIN_USER, provider: "basic", csrfToken: "" };
+    return true;
+  }
+  request.hccSession = null;
+  return false;
 }
 
 function redirectToLogin(response) {
@@ -952,7 +1179,7 @@ function sendLoginPage(response, errorMessage = "") {
       <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
       <button type="submit">Sign in</button>
     </form>
-    ${errorMessage ? `<div class="error">${errorMessage}</div>` : ""}
+    ${errorMessage ? `<div class="error">${escapeHtml(errorMessage)}</div>` : ""}
     <div class="link-row">
       <a href="/">View website</a>
       <a href="/reset-request">Forgot password?</a>
@@ -966,74 +1193,356 @@ function hasSupabaseAuthConfig() {
   return SUPABASE_AUTH_ENABLED && SUPABASE_URL && SUPABASE_ANON_KEY;
 }
 
-async function verifySupabaseLogin(username, password) {
-  if (!hasSupabaseAuthConfig()) return null;
-  const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
-    method: "POST",
+function escapeHtml(value = "") {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function makeCookie(name, value, maxAgeSeconds) {
+  return `${name}=${encodeURIComponent(value)}; HttpOnly; Path=/; SameSite=Strict; Max-Age=${Math.max(0, Math.floor(maxAgeSeconds))}${IS_PRODUCTION ? "; Secure" : ""}`;
+}
+
+function clearCookie(name) {
+  return makeCookie(name, "", 0);
+}
+
+async function supabaseAuthRequest(pathname, { method = "GET", accessToken = "", body } = {}) {
+  const response = await fetchWithTimeout(`${SUPABASE_URL}/auth/v1/${pathname}`, {
+    method,
     headers: {
       apikey: SUPABASE_ANON_KEY,
-      "Content-Type": "application/json"
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      ...(body === undefined ? {} : { "Content-Type": "application/json" })
     },
-    body: JSON.stringify({ email: username, password })
+    ...(body === undefined ? {} : { body: JSON.stringify(body) })
   });
   const payload = await response.json().catch(() => ({}));
+  return { response, payload };
+}
+
+async function verifySupabaseLogin(username, password) {
+  if (!hasSupabaseAuthConfig()) return null;
+  const { response, payload } = await supabaseAuthRequest("token?grant_type=password", {
+    method: "POST",
+    body: { email: username, password }
+  });
   if (!response.ok || !payload.user || !payload.user.email) return null;
 
   const email = String(payload.user.email).toLowerCase();
-  if (ADMIN_EMAILS.length > 0 && !ADMIN_EMAILS.includes(email)) return null;
+  if (ADMIN_EMAILS.length === 0 || !ADMIN_EMAILS.includes(email)) return null;
+  const accessToken = String(payload.access_token || "");
+  const claims = decodeJwtPayload(accessToken);
+  if (!accessToken || !claims || !Number.isFinite(Number(claims.exp)) || Number(claims.exp) * 1000 <= Date.now()) return null;
+  const verifiedUser = await fetchSupabaseUser(accessToken);
+  if (!verifiedUser || String(verifiedUser.email || "").toLowerCase() !== email || String(verifiedUser.id || "") !== String(claims.sub || "")) return null;
+  const factors = Array.isArray(verifiedUser.factors) ? verifiedUser.factors : [];
+  const verifiedFactors = factors.filter((factor) => factor?.status === "verified");
   return {
     identity: email,
     provider: "supabase",
-    accessToken: payload.access_token || ""
+    accessToken,
+    claims,
+    user: verifiedUser,
+    verifiedFactorIds: verifiedFactors
+      .filter((factor) => factor?.factor_type === "totp" && /^[a-z0-9-]{1,128}$/i.test(String(factor.id || "")))
+      .map((factor) => String(factor.id)),
+    hasUnsupportedVerifiedFactors: verifiedFactors.some((factor) => factor?.factor_type !== "totp"),
+    staleHccFactorIds: factors
+      .filter((factor) => factor?.factor_type === "totp" && factor?.status !== "verified" && String(factor?.friendly_name || "").startsWith("HCC Admin") && /^[a-z0-9-]{1,128}$/i.test(String(factor.id || "")))
+      .map((factor) => String(factor.id))
   };
 }
 
-async function handleLogin(request, response) {
-  const body = await readBody(request);
-  const params = new URLSearchParams(body);
-  const username = params.get("username") || "";
-  const password = params.get("password") || "";
-
-  const supabaseIdentity = await verifySupabaseLogin(username, password);
-  const fallbackIdentity = localAdminEnabled() && timingSafeEqual(username, ADMIN_USER) && timingSafeEqual(password, ADMIN_PASSWORD)
-    ? { identity: ADMIN_USER, provider: "local" }
-    : null;
-  const session = supabaseIdentity
-    ? { identity: supabaseIdentity.identity, provider: supabaseIdentity.provider }
-    : fallbackIdentity;
-
-  if (session) {
-    const value = makeSessionObjectValue(session);
-    response.writeHead(302, {
-      ...commonHeaders({
-        Location: "/admin",
-        "Set-Cookie": `${SESSION_COOKIE}=${encodeURIComponent(value)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}${IS_PRODUCTION ? "; Secure" : ""}`,
-        "Cache-Control": "no-store"
-      })
-    });
-    response.end();
-    return;
-  }
-
-  sendLoginPage(response, "Invalid username or password.");
+function makeAdminSession(login) {
+  const claims = login.claims || decodeJwtPayload(login.accessToken);
+  if (!claims || (SUPABASE_MFA_REQUIRED && claims.aal !== "aal2")) return null;
+  const userId = String(login.user?.id || "");
+  if (!userId || String(claims.sub || "") !== userId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(claims.session_id || ""))) return null;
+  if (SUPABASE_MFA_REQUIRED && (!Array.isArray(login.user?.factors) || !login.user.factors.some((factor) => factor?.factor_type === "totp" && factor?.status === "verified"))) return null;
+  const tokenExpiry = Number(claims.exp) * 1000;
+  if (!Number.isFinite(tokenExpiry) || tokenExpiry <= Date.now()) return null;
+  return makeSessionObjectValue({
+    identity: login.identity,
+    userId,
+    provider: "supabase",
+    accessToken: sealSecret(login.accessToken),
+    userUpdatedAt: String(login.user?.updated_at || ""),
+    csrfToken: crypto.randomBytes(32).toString("base64url"),
+    aal: String(claims.aal || "aal1"),
+    sessionId: String(claims.session_id || "")
+  }, SESSION_TTL_MS, tokenExpiry);
 }
 
-function handleLogout(response) {
+function sendAdminSessionRedirect(response, value) {
+  const session = parseSignedObject(value);
+  const maxAge = session ? Math.max(1, Math.floor((session.expiresAt - Date.now()) / 1000)) : 1;
   response.writeHead(302, {
     ...commonHeaders({
-      Location: "/login",
-      "Set-Cookie": `${SESSION_COOKIE}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0`,
+      Location: "/admin",
+      "Set-Cookie": [makeCookie(SESSION_COOKIE, value, maxAge), clearCookie(MFA_PENDING_COOKIE)],
       "Cache-Control": "no-store"
     })
   });
   response.end();
 }
 
-function requiresAdminAuth(request) {
-  const parsed = new URL(request.url, `http://localhost:${PORT}`);
-  const pathname = parsed.pathname;
+async function handleLogin(request, response) {
+  const body = await readBody(request, { maxBytes: MAX_FORM_BYTES, allowedTypes: ["application/x-www-form-urlencoded"] });
+  const params = new URLSearchParams(body);
+  const username = String(params.get("username") || "").trim().toLowerCase().slice(0, 254);
+  const password = params.get("password") || "";
+  const ipAllowed = await checkSharedRateLimit(request, "login-ip", 8, 15 * 60 * 1000);
+  const accountAllowed = await checkSharedRateLimit(request, "login-account", 8, 15 * 60 * 1000, username);
+  if (!ipAllowed || !accountAllowed) {
+    sendLoginPage(response, "Too many login attempts. Please try again later.");
+    return;
+  }
 
-  if (pathname === "/api/content" && request.method !== "GET") return true;
+  const supabaseIdentity = await verifySupabaseLogin(username, password);
+  const fallbackIdentity = localAdminEnabled() && timingSafeEqual(username, ADMIN_USER) && timingSafeEqual(password, ADMIN_PASSWORD)
+    ? { identity: ADMIN_USER, provider: "local" }
+    : null;
+  if (supabaseIdentity) {
+    if (SUPABASE_MFA_REQUIRED && supabaseIdentity.hasUnsupportedVerifiedFactors && supabaseIdentity.verifiedFactorIds.length === 0) {
+      sendLoginPage(response, "This account's two-factor configuration is not supported by the HCC admin panel.");
+      return;
+    }
+    if (SUPABASE_MFA_REQUIRED && supabaseIdentity.claims.aal !== "aal2") {
+      const pendingValue = makeSessionObjectValue({
+        identity: supabaseIdentity.identity,
+        userId: String(supabaseIdentity.user?.id || ""),
+        provider: "supabase",
+        accessToken: sealSecret(supabaseIdentity.accessToken),
+        verifiedFactorIds: supabaseIdentity.verifiedFactorIds,
+        staleHccFactorIds: supabaseIdentity.staleHccFactorIds,
+        csrfToken: crypto.randomBytes(32).toString("base64url")
+      }, MFA_PENDING_TTL_MS, Number(supabaseIdentity.claims.exp) * 1000);
+      response.writeHead(302, {
+        ...commonHeaders({
+          Location: "/mfa",
+          "Set-Cookie": [makeCookie(MFA_PENDING_COOKIE, pendingValue, MFA_PENDING_TTL_MS / 1000), clearCookie(SESSION_COOKIE)],
+          "Cache-Control": "no-store"
+        })
+      });
+      response.end();
+      return;
+    }
+    const value = makeAdminSession(supabaseIdentity);
+    if (value) {
+      sendAdminSessionRedirect(response, value);
+      return;
+    }
+  }
+
+  if (fallbackIdentity) {
+    const value = makeSessionObjectValue({
+      ...fallbackIdentity,
+      csrfToken: crypto.randomBytes(32).toString("base64url")
+    });
+    sendAdminSessionRedirect(response, value);
+    return;
+  }
+
+  sendLoginPage(response, "Invalid username or password.");
+}
+
+function sendMfaPage(response, pending, { errorMessage = "", setCookie = "", enrollment = null } = {}) {
+  const factorId = String(pending?.enrollmentFactorId || pending?.verifiedFactorIds?.[0] || "");
+  const needsEnrollment = !factorId;
+  const qrCode = String(enrollment?.qrCode || "");
+  const safeQrCode = qrCode.length <= 100000 && /^data:image\/svg\+xml(?:;[^,]*)?,/i.test(qrCode) ? qrCode : "";
+  response.writeHead(200, {
+    ...commonHeaders({
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+      ...(setCookie ? { "Set-Cookie": setCookie } : {})
+    })
+  });
+  response.end(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex,nofollow">
+  <title>HCC Admin Two-Factor Authentication</title>
+  <style>
+    :root { --red:#c8101e; --green:#0b5a38; --ink:#151a16; --line:rgba(12,83,51,.16); }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; display:grid; place-items:center; padding:24px; font-family:Arial,sans-serif; color:var(--ink); background:linear-gradient(135deg,#fffaf0,#eef6ea); }
+    main { width:min(440px,100%); padding:28px; border:1px solid var(--line); border-radius:10px; background:#fff; box-shadow:0 20px 70px rgba(18,23,19,.14); }
+    img.logo { width:64px; height:64px; object-fit:contain; margin-bottom:16px; }
+    img.qr { display:block; width:min(240px,100%); margin:20px auto; }
+    h1 { margin:0 0 8px; font-size:1.7rem; }
+    p { color:#607066; line-height:1.5; overflow-wrap:anywhere; }
+    code { display:block; padding:10px; border-radius:8px; background:#f4f4f1; overflow-wrap:anywhere; }
+    label { display:grid; gap:7px; margin-top:16px; color:#607066; font-size:.78rem; font-weight:700; letter-spacing:1px; text-transform:uppercase; }
+    input { width:100%; border:1px solid var(--line); border-radius:8px; padding:13px; font:inherit; }
+    button { width:100%; min-height:46px; margin-top:20px; border:0; border-radius:8px; color:#fff; background:var(--red); font-weight:800; letter-spacing:1px; text-transform:uppercase; cursor:pointer; }
+    .error { margin-top:14px; padding:11px 12px; border-radius:8px; color:#8e0712; background:rgba(200,16,30,.08); }
+    a { display:inline-block; margin-top:18px; color:var(--green); font-weight:700; }
+  </style>
+</head>
+<body>
+  <main>
+    <img class="logo" src="/logo.webp" alt="HCC logo">
+    <h1>${needsEnrollment ? "Secure your account" : "Two-factor verification"}</h1>
+    <p>${needsEnrollment
+      ? "HCC admin access requires an authenticator app. Start enrollment to create a time-based one-time password factor."
+      : enrollment
+        ? "Scan this QR code with an authenticator app, then enter the six-digit code to finish enrollment."
+        : "Enter the six-digit code from your authenticator app."}</p>
+    ${safeQrCode ? `<img class="qr" src="${escapeHtml(safeQrCode)}" alt="Authenticator setup QR code">` : ""}
+    ${enrollment?.secret ? `<p>If you cannot scan the code, enter this secret manually:</p><code>${escapeHtml(String(enrollment.secret))}</code>` : ""}
+    <form method="POST" action="${needsEnrollment ? "/mfa/enroll" : "/mfa/verify"}">
+      <input type="hidden" name="csrf" value="${escapeHtml(String(pending?.csrfToken || ""))}">
+      ${needsEnrollment ? "" : '<label>Authenticator code<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required></label>'}
+      <button type="submit">${needsEnrollment ? "Set up authenticator" : "Verify and sign in"}</button>
+    </form>
+    ${errorMessage ? `<div class="error">${escapeHtml(errorMessage)}</div>` : ""}
+    <a href="/login">Cancel and sign in again</a>
+  </main>
+</body>
+</html>`);
+}
+
+async function handleMfaEnroll(request, response) {
+  const pending = getPendingMfaSession(request);
+  if (!pending) {
+    redirectToLogin(response);
+    return;
+  }
+  const params = new URLSearchParams(await readBody(request, { maxBytes: MAX_FORM_BYTES, allowedTypes: ["application/x-www-form-urlencoded"] }));
+  if (!timingSafeEqual(String(params.get("csrf") || ""), String(pending.csrfToken || ""))) {
+    sendJson(response, 403, { error: "Invalid security token" });
+    return;
+  }
+  const accessToken = unsealSecret(pending.accessToken);
+  for (const factorId of Array.isArray(pending.staleHccFactorIds) ? pending.staleHccFactorIds : []) {
+    const { response: deleteResponse } = await supabaseAuthRequest(`factors/${encodeURIComponent(factorId)}`, {
+      method: "DELETE",
+      accessToken
+    });
+    if (!deleteResponse.ok) {
+      sendMfaPage(response, pending, { errorMessage: "A previous authenticator setup could not be cleared. Sign in again and retry." });
+      return;
+    }
+  }
+  const { response: enrollResponse, payload } = await supabaseAuthRequest("factors", {
+    method: "POST",
+    accessToken,
+    body: { factor_type: "totp", friendly_name: "HCC Admin Console", issuer: "Hamriyah Cricket Centre" }
+  });
+  const factorId = String(payload.id || "");
+  if (!enrollResponse.ok || !/^[a-z0-9-]{1,128}$/i.test(factorId) || !payload.totp) {
+    sendMfaPage(response, pending, { errorMessage: "Authenticator setup could not be started. Sign in again and retry." });
+    return;
+  }
+  const rawQrCode = String(payload.totp.qr_code || "");
+  const encodedQrCode = rawQrCode.trim().startsWith("<svg")
+    ? `data:image/svg+xml;base64,${Buffer.from(rawQrCode, "utf8").toString("base64")}`
+    : rawQrCode;
+  const nextPending = {
+    ...pending,
+    enrollmentFactorId: factorId,
+    staleHccFactorIds: []
+  };
+  const pendingValue = makeSessionObjectValue(nextPending, MFA_PENDING_TTL_MS);
+  sendMfaPage(response, parseSignedObject(pendingValue), {
+    setCookie: makeCookie(MFA_PENDING_COOKIE, pendingValue, MFA_PENDING_TTL_MS / 1000),
+    enrollment: {
+      qrCode: encodedQrCode,
+      secret: String(payload.totp.secret || "")
+    }
+  });
+}
+
+async function handleMfaVerify(request, response) {
+  const pending = getPendingMfaSession(request);
+  if (!pending) {
+    redirectToLogin(response);
+    return;
+  }
+  const params = new URLSearchParams(await readBody(request, { maxBytes: MAX_FORM_BYTES, allowedTypes: ["application/x-www-form-urlencoded"] }));
+  if (!timingSafeEqual(String(params.get("csrf") || ""), String(pending.csrfToken || ""))) {
+    sendJson(response, 403, { error: "Invalid security token" });
+    return;
+  }
+  const code = String(params.get("code") || "").trim();
+  const factorId = String(pending.enrollmentFactorId || pending.verifiedFactorIds?.[0] || "");
+  if (!/^\d{6}$/.test(code) || !/^[a-z0-9-]{1,128}$/i.test(factorId)) {
+    sendMfaPage(response, pending, { errorMessage: "Enter a valid six-digit authenticator code." });
+    return;
+  }
+  const ipAllowed = await checkSharedRateLimit(request, "mfa-ip", 10, 15 * 60 * 1000);
+  const accountAllowed = await checkSharedRateLimit(request, "mfa-account", 10, 15 * 60 * 1000, pending.identity);
+  if (!ipAllowed || !accountAllowed) {
+    sendMfaPage(response, pending, { errorMessage: "Too many verification attempts. Sign in again later." });
+    return;
+  }
+
+  const accessToken = unsealSecret(pending.accessToken);
+  const { response: challengeResponse, payload: challenge } = await supabaseAuthRequest(`factors/${encodeURIComponent(factorId)}/challenge`, {
+    method: "POST",
+    accessToken,
+    body: {}
+  });
+  if (!challengeResponse.ok || !challenge.id) {
+    sendMfaPage(response, pending, { errorMessage: "Verification could not be started. Sign in again and retry." });
+    return;
+  }
+  const { response: verifyResponse, payload } = await supabaseAuthRequest(`factors/${encodeURIComponent(factorId)}/verify`, {
+    method: "POST",
+    accessToken,
+    body: { challenge_id: challenge.id, code }
+  });
+  const upgradedToken = String(payload.access_token || "");
+  const claims = decodeJwtPayload(upgradedToken);
+  if (!verifyResponse.ok || !claims || claims.aal !== "aal2") {
+    sendMfaPage(response, pending, { errorMessage: "That authenticator code was not accepted." });
+    return;
+  }
+  const user = await fetchSupabaseUser(upgradedToken);
+  const email = String(user?.email || "").toLowerCase();
+  if (email !== String(pending.identity).toLowerCase() || String(user?.id || "") !== String(pending.userId || "") || String(claims.sub || "") !== String(pending.userId || "") || !ADMIN_EMAILS.includes(email)) {
+    sendMfaPage(response, pending, { errorMessage: "This account is not allowed to access HCC admin." });
+    return;
+  }
+  const value = makeAdminSession({ identity: email, accessToken: upgradedToken, claims, user });
+  if (!value) {
+    sendMfaPage(response, pending, { errorMessage: "A secure admin session could not be created." });
+    return;
+  }
+  sendAdminSessionRedirect(response, value);
+}
+
+async function handleLogout(request, response) {
+  const session = request.hccSession || getSession(request);
+  const accessToken = session?.provider === "supabase" ? (session.accessTokenPlaintext || unsealSecret(session.accessToken)) : "";
+  if (session?.sessionId) revokedSessionIds.set(String(session.sessionId), Number(session.expiresAt) || Date.now() + SESSION_TTL_MS);
+  if (accessToken && hasSupabaseAuthConfig()) {
+    try {
+      const { response: logoutResponse } = await supabaseAuthRequest("logout?scope=global", { method: "POST", accessToken });
+      if (!logoutResponse.ok) console.error(`Supabase global logout failed with status ${logoutResponse.status}.`);
+    } catch (error) {
+      console.error("Supabase global logout failed:", error.message || error);
+    }
+  }
+  response.writeHead(302, {
+    ...commonHeaders({
+      Location: "/login",
+      "Set-Cookie": [clearCookie(SESSION_COOKIE), clearCookie(MFA_PENDING_COOKIE)],
+      "Cache-Control": "no-store"
+    })
+  });
+  response.end();
+}
+
+function requiresAdminAuth(pathname, method = "GET") {
+  if (pathname === "/api/content" && method !== "GET") return true;
   if (pathname === "/api/upload") return true;
   if (pathname === "/api/cloudinary/delete") return true;
   if (pathname === "/api/session") return true;
@@ -1041,18 +1550,19 @@ function requiresAdminAuth(request) {
   if (pathname === "/api/bookings" || pathname.startsWith("/api/bookings/")) return true;
   if (pathname === "/api/password-reset") return true;
   if (pathname === "/api/password-update") return true;
+  if (pathname === "/logout") return true;
   return pathname === "/admin" ||
     pathname === "/index.html" ||
     pathname === "/admin.css" ||
     pathname === "/admin.js";
 }
 
-function isSameOriginWrite(request) {
+function isSameOriginWrite(request, { requireHeader = false } = {}) {
   if (!new Set(["POST", "PUT", "PATCH", "DELETE"]).has(request.method)) return true;
   if (String(request.headers["sec-fetch-site"] || "").toLowerCase() === "cross-site") return false;
 
   const suppliedOrigin = request.headers.origin || request.headers.referer;
-  if (!suppliedOrigin) return true;
+  if (!suppliedOrigin) return !requireHeader;
   try {
     return new URL(suppliedOrigin).origin === getTrustedOrigin(request);
   } catch {
@@ -1060,21 +1570,94 @@ function isSameOriginWrite(request) {
   }
 }
 
-function readBody(request, maxBytes = MAX_JSON_BYTES) {
+function hasValidCsrfToken(request) {
+  const session = request.hccSession;
+  if (!session) return false;
+  if (session.provider === "basic") return isSameOriginWrite(request, { requireHeader: true });
+  const supplied = String(request.headers["x-hcc-csrf"] || "");
+  return Boolean(session.csrfToken) && timingSafeEqual(supplied, session.csrfToken);
+}
+
+function readBody(request, { maxBytes = MAX_JSON_BYTES, allowedTypes = [] } = {}) {
   return new Promise((resolve, reject) => {
-    let body = "";
+    if (activeBodyReads >= MAX_CONCURRENT_BODY_READS) {
+      const error = new Error("The server is busy. Please retry shortly.");
+      error.statusCode = 503;
+      request.resume();
+      reject(error);
+      return;
+    }
+    const contentType = String(request.headers["content-type"] || "").split(";", 1)[0].trim().toLowerCase();
+    if (allowedTypes.length && !allowedTypes.includes(contentType)) {
+      const error = new Error("Unsupported content type");
+      error.statusCode = 415;
+      request.resume();
+      reject(error);
+      return;
+    }
+    const rawLength = request.headers["content-length"];
+    if (rawLength !== undefined) {
+      const contentLength = Number(rawLength);
+      if (!Number.isSafeInteger(contentLength) || contentLength < 0) {
+        const error = new Error("Invalid Content-Length");
+        error.statusCode = 400;
+        request.resume();
+        reject(error);
+        return;
+      }
+      if (contentLength > maxBytes) {
+        const error = new Error("Request body too large");
+        error.statusCode = 413;
+        request.resume();
+        reject(error);
+        return;
+      }
+    }
+
+    activeBodyReads += 1;
+    const chunks = [];
+    let size = 0;
+    let settled = false;
+    const finish = () => {
+      if (settled) return false;
+      settled = true;
+      activeBodyReads = Math.max(0, activeBodyReads - 1);
+      return true;
+    };
     request.on("data", (chunk) => {
-      body += chunk;
-      if (body.length > maxBytes) {
+      if (settled) return;
+      size += chunk.length;
+      if (size > maxBytes) {
+        finish();
         const error = new Error("Request body too large");
         error.statusCode = 413;
         reject(error);
-        request.destroy();
+        request.resume();
+        return;
       }
+      chunks.push(chunk);
     });
-    request.on("end", () => resolve(body));
-    request.on("error", reject);
+    request.on("end", () => {
+      if (finish()) resolve(Buffer.concat(chunks).toString("utf8"));
+    });
+    request.on("error", (error) => {
+      if (finish()) reject(error);
+    });
+    request.on("aborted", () => {
+      if (finish()) reject(new Error("Request aborted"));
+    });
   });
+}
+
+async function readJsonBody(request, maxBytes = MAX_JSON_BYTES) {
+  const body = await readBody(request, { maxBytes, allowedTypes: ["application/json"] });
+  try {
+    const parsed = JSON.parse(body);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Invalid JSON object");
+    return parsed;
+  } catch {
+    throw new ValidationError("Invalid JSON request body.");
+  }
 }
 
 function sendResetRequestPage(response, message = "", isError = false) {
@@ -1114,7 +1697,7 @@ function sendResetRequestPage(response, message = "", isError = false) {
       <label>Email<input name="email" type="email" autocomplete="email" required></label>
       <button type="submit">Send reset email</button>
     </form>
-    ${message ? `<div class="message">${message}</div>` : ""}
+    ${message ? `<div class="message">${escapeHtml(message)}</div>` : ""}
     <a href="/login">Back to login</a>
   </main>
 </body>
@@ -1127,12 +1710,12 @@ async function sendSupabasePasswordReset(email, request) {
   }
   const cleanEmail = String(email || "").trim().toLowerCase();
   if (!cleanEmail) throw new Error("Email is required.");
-  if (ADMIN_EMAILS.length > 0 && !ADMIN_EMAILS.includes(cleanEmail)) {
+  if (ADMIN_EMAILS.length === 0 || !ADMIN_EMAILS.includes(cleanEmail)) {
     return { ok: true };
   }
 
   const redirectTo = `${getTrustedOrigin(request)}/reset-password`;
-  const resetResponse = await fetch(`${SUPABASE_URL}/auth/v1/recover?redirect_to=${encodeURIComponent(redirectTo)}`, {
+  const resetResponse = await fetchWithTimeout(`${SUPABASE_URL}/auth/v1/recover?redirect_to=${encodeURIComponent(redirectTo)}`, {
     method: "POST",
     headers: {
       apikey: SUPABASE_ANON_KEY,
@@ -1141,41 +1724,85 @@ async function sendSupabasePasswordReset(email, request) {
     body: JSON.stringify({ email: cleanEmail })
   });
   const payload = await resetResponse.json().catch(() => ({}));
-  if (!resetResponse.ok) {
-    throw new Error(payload.error_description || payload.msg || payload.message || "Password reset failed.");
-  }
+  if (!resetResponse.ok) throw new Error("Password reset failed.");
   return { ok: true };
 }
 
-async function updateSupabasePasswordWithLogin(identity, currentPassword, newPassword) {
+async function updateSupabasePasswordWithSession(session, currentPassword, newPassword) {
   if (!hasSupabaseAuthConfig()) throw new Error("Supabase Auth is not configured.");
-  if (!identity || !currentPassword || !newPassword) throw new Error("Current and new passwords are required.");
+  if (!session?.identity || !currentPassword || !newPassword) throw new Error("Current and new passwords are required.");
   if (String(newPassword).length < 8) throw new Error("New password must be at least 8 characters.");
-
-  const login = await verifySupabaseLogin(identity, currentPassword);
-  if (!login || !login.accessToken) throw new Error("Current password is incorrect.");
-  return updateSupabasePasswordWithToken(login.accessToken, newPassword);
+  const accessToken = session.accessTokenPlaintext || unsealSecret(session.accessToken);
+  if (!accessToken) throw new Error("Your admin session has expired.");
+  return updateSupabasePasswordWithToken(accessToken, newPassword, currentPassword);
 }
 
-async function updateSupabasePasswordWithToken(accessToken, newPassword) {
+async function updateSupabasePasswordWithToken(accessToken, newPassword, currentPassword = "") {
   if (!hasSupabaseAuthConfig()) throw new Error("Supabase Auth is not configured.");
   if (!accessToken || !newPassword) throw new Error("Access token and new password are required.");
   if (String(newPassword).length < 8) throw new Error("New password must be at least 8 characters.");
 
-  const updateResponse = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+  const updateResponse = await fetchWithTimeout(`${SUPABASE_URL}/auth/v1/user`, {
     method: "PUT",
     headers: {
       apikey: SUPABASE_ANON_KEY,
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ password: newPassword })
+    body: JSON.stringify({ password: newPassword, ...(currentPassword ? { current_password: currentPassword } : {}) })
   });
   const payload = await updateResponse.json().catch(() => ({}));
-  if (!updateResponse.ok) {
-    throw new Error(payload.error_description || payload.msg || payload.message || "Password update failed.");
+  if (!updateResponse.ok) throw new Error("Password update failed. Check the current password and try again.");
+  try {
+    await supabaseAuthRequest("logout?scope=global", { method: "POST", accessToken });
+  } catch {
+    // Supabase may invalidate the access token immediately after a password change.
   }
   return { ok: true };
+}
+
+async function updateSupabasePasswordFromRecovery(accessToken, newPassword, mfaCode) {
+  if (!hasSupabaseAuthConfig()) throw new Error("Supabase Auth is not configured.");
+  const cleanToken = String(accessToken || "");
+  const claims = decodeJwtPayload(cleanToken);
+  const authMethods = Array.isArray(claims?.amr)
+    ? claims.amr.map((entry) => typeof entry === "string" ? entry : entry?.method).filter(Boolean)
+    : [];
+  if (!claims || !authMethods.includes("recovery") || Number(claims.exp) * 1000 <= Date.now()) {
+    throw new ValidationError("This password reset link is invalid or expired.");
+  }
+  const user = await fetchSupabaseUser(cleanToken);
+  const email = String(user?.email || "").toLowerCase();
+  if (!user || String(user.id || "") !== String(claims.sub || "") || !ADMIN_EMAILS.includes(email)) {
+    throw new ValidationError("This password reset link is invalid or expired.");
+  }
+
+  const factors = Array.isArray(user.factors)
+    ? user.factors.filter((factor) => factor?.factor_type === "totp" && factor?.status === "verified" && /^[a-z0-9-]{1,128}$/i.test(String(factor.id || "")))
+    : [];
+  let verifiedToken = cleanToken;
+  if (factors.length) {
+    const code = String(mfaCode || "").trim();
+    if (!/^\d{6}$/.test(code)) throw new ValidationError("Enter the six-digit code from your authenticator app.");
+    const factorId = String(factors[0].id);
+    const { response: challengeResponse, payload: challenge } = await supabaseAuthRequest(`factors/${encodeURIComponent(factorId)}/challenge`, {
+      method: "POST",
+      accessToken: cleanToken,
+      body: {}
+    });
+    if (!challengeResponse.ok || !challenge.id) throw new ValidationError("Authenticator verification failed.");
+    const { response: verifyResponse, payload } = await supabaseAuthRequest(`factors/${encodeURIComponent(factorId)}/verify`, {
+      method: "POST",
+      accessToken: cleanToken,
+      body: { challenge_id: challenge.id, code }
+    });
+    const upgradedClaims = decodeJwtPayload(payload.access_token);
+    if (!verifyResponse.ok || !upgradedClaims || upgradedClaims.aal !== "aal2" || String(upgradedClaims.sub || "") !== String(user.id)) {
+      throw new ValidationError("Authenticator verification failed.");
+    }
+    verifiedToken = String(payload.access_token);
+  }
+  return updateSupabasePasswordWithToken(verifiedToken, newPassword);
 }
 
 function sendResetPasswordPage(response) {
@@ -1214,51 +1841,22 @@ function sendResetPasswordPage(response) {
     <p>Enter a new password for your HCC admin account.</p>
     <form id="resetForm">
       <label>New password<input id="password" type="password" autocomplete="new-password" minlength="8" required></label>
+      <label>Authenticator code (if enrolled)<input id="mfaCode" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6"></label>
       <button type="submit">Update password</button>
     </form>
     <div class="message" id="message" hidden></div>
     <a href="/login">Back to login</a>
   </main>
-  <script>
-    const params = new URLSearchParams(window.location.hash.slice(1));
-    const token = params.get("access_token");
-    const message = document.getElementById("message");
-    if (!token) {
-      message.hidden = false;
-      message.className = "message error";
-      message.textContent = "This reset link is missing or expired. Request a new reset email.";
-    }
-    document.getElementById("resetForm").addEventListener("submit", async (event) => {
-      event.preventDefault();
-      message.hidden = false;
-      message.className = "message";
-      message.textContent = "Updating password...";
-      const response = await fetch("/api/password-update-token", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accessToken: token, newPassword: document.getElementById("password").value })
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        message.className = "message error";
-        message.textContent = result.error || "Password update failed.";
-        return;
-      }
-      history.replaceState(null, "", "/login");
-      message.textContent = "Password updated. You can sign in now.";
-    });
-  </script>
+  <script src="/reset-password.js" defer></script>
 </body>
 </html>`);
 }
 
-function serveFile(requestUrl, response) {
-  const parsed = new URL(requestUrl, `http://localhost:${PORT}`);
-  let routePath = parsed.pathname;
+function serveFile(requestPathname, response, { protectedAsset = false } = {}) {
+  let routePath = requestPathname;
   if (routePath === "/") routePath = "/site.html";
   if (routePath === "/admin") routePath = "/index.html";
-  const pathname = decodeURIComponent(routePath);
-  const safePath = publicFiles.get(pathname);
+  const safePath = publicFiles.get(routePath);
   if (!safePath) {
     response.writeHead(404, commonHeaders({ "Content-Type": "text/plain; charset=utf-8" }));
     response.end("Not found");
@@ -1282,7 +1880,7 @@ function serveFile(requestUrl, response) {
     response.writeHead(200, {
       ...commonHeaders({
         "Content-Type": mimeTypes[extname] || "application/octet-stream",
-        "Cache-Control": getStaticCacheControl(extname)
+        "Cache-Control": getStaticCacheControl(extname, protectedAsset)
       })
     });
     response.end(file);
@@ -1317,6 +1915,20 @@ function getRequestOrigin(request) {
     return `http://localhost:${PORT}`;
   }
   return `${protocol}://${host}`;
+}
+
+function canonicalizePathname(rawPathname) {
+  try {
+    const pathname = decodeURIComponent(String(rawPathname || "/"));
+    if (!pathname.startsWith("/") || /[\\\u0000-\u001f\u007f]/.test(pathname)) {
+      throw new Error("Invalid request path");
+    }
+    return pathname;
+  } catch {
+    const error = new Error("Invalid request path");
+    error.statusCode = 400;
+    throw error;
+  }
 }
 
 function authMode() {
@@ -1390,47 +2002,7 @@ function sendBookingStatusPage(response) {
       <p class="privacy">Having trouble? Contact HCC using the details on the <a href="/#contact">website</a>. Read our <a href="/privacy">Privacy Policy</a>.</p>
     </section>
   </main>
-  <script>
-    document.getElementById('status-form').addEventListener('submit', async function (event) {
-      event.preventDefault();
-      var button = this.querySelector('button');
-      var result = document.getElementById('status-result');
-      var data = Object.fromEntries(new FormData(this).entries());
-      data.reference = String(data.reference || '').trim().toUpperCase();
-      data.email = String(data.email || '').trim().toLowerCase();
-      result.className = 'message';
-      if (!/^HCC-\\d{8}-[A-Z0-9]{6,12}$/.test(data.reference) || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$/.test(data.email)) {
-        result.textContent = 'Enter a valid HCC booking reference and email address.';
-        result.className = 'message visible error';
-        return;
-      }
-      button.disabled = true;
-      button.textContent = 'Checking...';
-      try {
-        var apiResponse = await fetch('/api/booking-status', { method:'POST', headers:{'Accept':'application/json','Content-Type':'application/json'}, body:JSON.stringify(data) });
-        var booking = await apiResponse.json().catch(function () { return {}; });
-        if (!apiResponse.ok) throw new Error(booking.error || 'No matching booking was found.');
-        var labels = {
-          new:'Received — HCC has your request.', contacted:'Contacted — the HCC team is following up.',
-          confirmed:'Confirmed — your booking has been approved.', declined:'Not available — please contact HCC for alternatives.',
-          completed:'Completed.', cancelled:'Cancelled.'
-        };
-        var detail = booking.booking_date_label || booking.booking_date || booking.tournament_name || booking.booking_type || '';
-        result.textContent = (labels[booking.status] || booking.status) + (detail ? ' ' + detail + '.' : '') + ' ';
-        var reference = document.createElement('span');
-        reference.className = 'reference';
-        reference.textContent = booking.reference;
-        result.appendChild(reference);
-        result.className = 'message visible success';
-      } catch (error) {
-        result.textContent = error.message || 'We could not check that booking.';
-        result.className = 'message visible error';
-      } finally {
-        button.disabled = false;
-        button.textContent = 'Check status';
-      }
-    });
-  </script>
+  <script src="/booking-status.js" defer></script>
 </body>
 </html>`);
 }
@@ -1507,28 +2079,7 @@ function sendBookingConfirmationPage(response) {
       <a class="button" href="/#booking">Go to booking</a>
     </section>
   </main>
-  <script>
-    (function () {
-      var data = null;
-      try { data = JSON.parse(sessionStorage.getItem('hcc-booking-confirmation') || 'null'); } catch (_) {}
-      if (!data && location.hash.length > 1) {
-        try { data = JSON.parse(decodeURIComponent(location.hash.slice(1))); } catch (_) {}
-      }
-      var validReference = data && /^HCC-\\d{8}-[A-Z0-9]{6,12}$/.test(String(data.reference || '').toUpperCase());
-      if (!validReference) {
-        document.getElementById('confirmation-missing').style.display = 'block';
-        return;
-      }
-      document.getElementById('confirmation-reference').textContent = String(data.reference).toUpperCase();
-      document.getElementById('confirmation-type').textContent = String(data.requestType || 'Booking request');
-      document.getElementById('confirmation-title').textContent = String(data.title || 'HCC booking');
-      var detail = String(data.detail || '');
-      document.getElementById('confirmation-detail').textContent = detail;
-      if (!detail) document.getElementById('confirmation-detail-row').hidden = true;
-      if (data.deliveryDelayed) document.getElementById('confirmation-warning').style.display = 'block';
-      document.getElementById('confirmation-content').hidden = false;
-    }());
-  </script>
+  <script src="/booking-confirmation.js" defer></script>
 </body>
 </html>`);
 }
@@ -1818,6 +2369,7 @@ function sendLegalPage(response, type) {
 const server = http.createServer(async (request, response) => {
   try {
     const parsed = new URL(request.url, `http://localhost:${PORT}`);
+    const pathname = canonicalizePathname(parsed.pathname);
 
     if (!checkRateLimit(request, "global", 600, 60 * 1000)) {
       sendJson(response, 429, { error: "Too many requests" });
@@ -1829,115 +2381,162 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
-    if (parsed.pathname === "/health") {
+    if (pathname === "/health" && request.method === "GET") {
       const readinessIssues = getProductionReadinessIssues();
       sendJson(response, readinessIssues.length ? 503 : 200, {
         ok: readinessIssues.length === 0,
-        ready: readinessIssues.length === 0,
-        readinessIssues,
-        contentStorage: hasSupabaseConfig() ? "supabase" : "local-json",
-        bookingStorage: hasSupabaseConfig() ? "supabase" : "local-json",
-        bookingRetentionDays: BOOKING_RETENTION_DAYS,
-        imageStorage: hasCloudinaryConfig() ? "cloudinary" : "local-data",
-        auth: authMode(),
-        localAdmin: localAdminEnabled() ? "enabled" : "disabled",
-        forms: FORMSPREE_ENDPOINT ? "configured" : "missing"
+        ready: readinessIssues.length === 0
       });
       return;
     }
 
-    if (parsed.pathname === "/robots.txt") {
+    if (pathname === "/robots.txt" && request.method === "GET") {
       sendRobots(request, response);
       return;
     }
 
-    if (parsed.pathname === "/sitemap.xml") {
+    if (pathname === "/sitemap.xml" && request.method === "GET") {
       sendSitemap(request, response);
       return;
     }
 
-    if (parsed.pathname === "/booking-status" && request.method === "GET") {
+    if (pathname === "/booking-status" && request.method === "GET") {
       sendBookingStatusPage(response);
       return;
     }
 
-    if (parsed.pathname === "/booking-confirmation" && request.method === "GET") {
+    if (pathname === "/booking-confirmation" && request.method === "GET") {
       sendBookingConfirmationPage(response);
       return;
     }
 
-    if (parsed.pathname === "/privacy") {
+    if (pathname === "/privacy" && request.method === "GET") {
       sendLegalPage(response, "privacy");
       return;
     }
 
-    if (parsed.pathname === "/terms") {
+    if (pathname === "/terms" && request.method === "GET") {
       sendLegalPage(response, "terms");
       return;
     }
 
-    if (parsed.pathname === "/login" && request.method === "GET") {
+    if (pathname === "/login" && request.method === "GET") {
       sendLoginPage(response);
       return;
     }
 
-    if (parsed.pathname === "/login" && request.method === "POST") {
-      if (!checkRateLimit(request, "login", 8, 15 * 60 * 1000)) {
-        sendLoginPage(response, "Too many login attempts. Please try again later.");
+    if (pathname === "/login" && request.method === "POST") {
+      if (!isSameOriginWrite(request, { requireHeader: true })) {
+        sendJson(response, 403, { error: "Cross-site request blocked" });
         return;
       }
       await handleLogin(request, response);
       return;
     }
 
-    if (parsed.pathname === "/reset-request" && request.method === "GET") {
+    if (pathname === "/mfa" && request.method === "GET") {
+      const pending = getPendingMfaSession(request);
+      if (!pending) redirectToLogin(response);
+      else sendMfaPage(response, pending);
+      return;
+    }
+
+    if (pathname === "/mfa/enroll" && request.method === "POST") {
+      if (!isSameOriginWrite(request, { requireHeader: true })) {
+        sendJson(response, 403, { error: "Cross-site request blocked" });
+        return;
+      }
+      const pending = getPendingMfaSession(request);
+      const allowed = pending && await checkSharedRateLimit(request, "mfa-enroll", 4, 60 * 60 * 1000, pending.identity);
+      if (!allowed) {
+        sendJson(response, 429, { error: "Too many enrollment attempts" });
+        return;
+      }
+      await handleMfaEnroll(request, response);
+      return;
+    }
+
+    if (pathname === "/mfa/verify" && request.method === "POST") {
+      if (!isSameOriginWrite(request, { requireHeader: true })) {
+        sendJson(response, 403, { error: "Cross-site request blocked" });
+        return;
+      }
+      await handleMfaVerify(request, response);
+      return;
+    }
+
+    if (pathname === "/reset-request" && request.method === "GET") {
       sendResetRequestPage(response);
       return;
     }
 
-    if (parsed.pathname === "/reset-request" && request.method === "POST") {
-      if (!checkRateLimit(request, "password-reset", 5, 60 * 60 * 1000)) {
+    if (pathname === "/reset-request" && request.method === "POST") {
+      if (!isSameOriginWrite(request, { requireHeader: true })) {
+        sendJson(response, 403, { error: "Cross-site request blocked" });
+        return;
+      }
+      const params = new URLSearchParams(await readBody(request, { maxBytes: MAX_FORM_BYTES, allowedTypes: ["application/x-www-form-urlencoded"] }));
+      const email = String(params.get("email") || "").trim().toLowerCase();
+      const ipAllowed = await checkSharedRateLimit(request, "password-reset-ip", 5, 60 * 60 * 1000);
+      const accountAllowed = await checkSharedRateLimit(request, "password-reset-account", 5, 60 * 60 * 1000, email);
+      if (!ipAllowed || !accountAllowed) {
         sendResetRequestPage(response, "Too many reset requests. Please try again later.", true);
         return;
       }
-      const params = new URLSearchParams(await readBody(request));
       try {
-        await sendSupabasePasswordReset(params.get("email"), request);
-        sendResetRequestPage(response, "If that email is allowed, a reset link has been sent.");
+        await sendSupabasePasswordReset(email, request);
       } catch (error) {
-        sendResetRequestPage(response, error.message || "Password reset failed.", true);
+        console.error("Password reset request failed:", error.message || error);
       }
+      sendResetRequestPage(response, "If that email is allowed, a reset link has been sent.");
       return;
     }
 
-    if (parsed.pathname === "/reset-password" && request.method === "GET") {
+    if (pathname === "/reset-password" && request.method === "GET") {
       sendResetPasswordPage(response);
       return;
     }
 
-    if (parsed.pathname === "/logout") {
-      handleLogout(response);
+    if (pathname === "/logout" && request.method !== "POST") {
+      sendJson(response, 405, { error: "Method not allowed" }, { Allow: "POST" });
       return;
     }
 
-    if (requiresAdminAuth(request) && !isAuthorized(request)) {
-      if (parsed.pathname.startsWith("/api/")) sendUnauthorizedJson(response);
+    const protectedRoute = requiresAdminAuth(pathname, request.method);
+    if (protectedRoute && !(await isAuthorized(request))) {
+      if (pathname.startsWith("/api/")) sendUnauthorizedJson(response);
       else redirectToLogin(response);
       return;
     }
 
-    if (request.url === "/api/content" && request.method === "GET") {
-      sendJson(response, 200, await readContent(), {
+    if (protectedRoute && new Set(["POST", "PUT", "PATCH", "DELETE"]).has(request.method)) {
+      if (!isSameOriginWrite(request, { requireHeader: true }) || !hasValidCsrfToken(request)) {
+        sendJson(response, 403, { error: "Invalid CSRF token" });
+        return;
+      }
+    }
+
+    if (pathname === "/logout" && request.method === "POST") {
+      await handleLogout(request, response);
+      return;
+    }
+
+    if (pathname === "/api/content" && request.method === "GET") {
+      const content = await readContent();
+      const authenticated = await isAuthorized(request);
+      sendJson(response, 200, authenticated ? content : projectPublicContent(content), authenticated ? {} : {
         "Cache-Control": "public, max-age=60, stale-while-revalidate=300"
       });
       return;
     }
 
-    if (request.url === "/api/session" && request.method === "GET") {
-      const session = getSession(request);
+    if (pathname === "/api/session" && request.method === "GET") {
+      const session = request.hccSession;
       sendJson(response, 200, {
         identity: session?.identity || ADMIN_USER,
         provider: session?.provider || "basic",
+        csrfToken: session?.csrfToken || "",
+        mfa: session?.aal === "aal2",
         contentStorage: hasSupabaseConfig() ? "supabase" : "local-json",
         bookingStorage: hasSupabaseConfig() ? "supabase" : "local-json",
         bookingRetentionDays: BOOKING_RETENTION_DAYS,
@@ -1948,33 +2547,35 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
-    if (request.url === "/api/audit" && request.method === "GET") {
+    if (pathname === "/api/audit" && request.method === "GET") {
       sendJson(response, 200, { entries: await readAuditLog() });
       return;
     }
 
-    if (request.url === "/api/audit" && request.method === "DELETE") {
+    if (pathname === "/api/audit" && request.method === "DELETE") {
       clearAuditLog();
       await logAudit(request, "audit.clear");
       sendJson(response, 200, { ok: true });
       return;
     }
 
-    if (parsed.pathname === "/api/bookings" && request.method === "GET") {
+    if (pathname === "/api/bookings" && request.method === "GET") {
       sendJson(response, 200, { bookings: await readBookings() });
       return;
     }
 
-    if (parsed.pathname === "/api/booking-status" && request.method === "POST") {
-      if (!checkRateLimit(request, "booking-status", 12, 15 * 60 * 1000)) {
-        sendJson(response, 429, { error: "Too many status checks. Please try again later." });
-        return;
-      }
-      const payload = JSON.parse(await readBody(request, 8 * 1024));
+    if (pathname === "/api/booking-status" && request.method === "POST") {
+      const payload = await readJsonBody(request, 8 * 1024);
       const reference = String(payload.reference || "").trim().toUpperCase();
       const email = String(payload.email || "").trim().toLowerCase();
       if (!/^HCC-\d{8}-[A-Z0-9]{6,12}$/.test(reference) || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
         throw new ValidationError("Enter a valid booking reference and email address.");
+      }
+      const ipAllowed = await checkSharedRateLimit(request, "booking-status-ip", 12, 15 * 60 * 1000);
+      const subjectAllowed = await checkSharedRateLimit(request, "booking-status-subject", 12, 15 * 60 * 1000, `${reference}:${email}`);
+      if (!ipAllowed || !subjectAllowed) {
+        sendJson(response, 429, { error: "Too many status checks. Please try again later." });
+        return;
       }
       const booking = await findBookingForCustomer(reference, email);
       if (!booking) {
@@ -1985,29 +2586,29 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
-    if (parsed.pathname.startsWith("/api/bookings/") && request.method === "PATCH") {
+    if (pathname.startsWith("/api/bookings/") && request.method === "PATCH") {
       if (!checkRateLimit(request, "booking-update", 120, 60 * 1000)) {
         sendJson(response, 429, { error: "Too many booking updates" });
         return;
       }
-      const reference = decodeURIComponent(parsed.pathname.slice("/api/bookings/".length));
+      const reference = pathname.slice("/api/bookings/".length);
       if (!/^HCC-\d{8}-[A-Z0-9]{6,12}$/.test(reference)) {
         sendJson(response, 400, { error: "Invalid booking reference" });
         return;
       }
-      const changes = JSON.parse(await readBody(request));
+      const changes = await readJsonBody(request, 16 * 1024);
       const booking = await updateBooking(reference, changes);
       await logAudit(request, "booking.update", { reference, status: booking.status });
       sendJson(response, 200, booking);
       return;
     }
 
-    if (parsed.pathname.startsWith("/api/bookings/") && request.method === "DELETE") {
+    if (pathname.startsWith("/api/bookings/") && request.method === "DELETE") {
       if (!checkRateLimit(request, "booking-delete", 30, 60 * 1000)) {
         sendJson(response, 429, { error: "Too many booking deletions" });
         return;
       }
-      const reference = decodeURIComponent(parsed.pathname.slice("/api/bookings/".length));
+      const reference = pathname.slice("/api/bookings/".length);
       if (!/^HCC-\d{8}-[A-Z0-9]{6,12}$/.test(reference)) {
         sendJson(response, 400, { error: "Invalid booking reference" });
         return;
@@ -2018,12 +2619,12 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
-    if (request.url === "/api/content" && request.method === "POST") {
+    if (pathname === "/api/content" && request.method === "POST") {
       if (!checkRateLimit(request, "content-write", 80, 60 * 1000)) {
         sendJson(response, 429, { error: "Too many save requests" });
         return;
       }
-      const payload = JSON.parse(await readBody(request));
+      const payload = await readJsonBody(request, MAX_CONTENT_BYTES);
       const saved = await writeContent(payload);
       await logAudit(request, "content.save", {
         tournaments: saved.tournaments.length,
@@ -2035,12 +2636,12 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
-    if (request.url === "/api/upload" && request.method === "POST") {
+    if (pathname === "/api/upload" && request.method === "POST") {
       if (!checkRateLimit(request, "upload", 30, 60 * 1000)) {
         sendJson(response, 429, { error: "Too many upload requests" });
         return;
       }
-      const payload = JSON.parse(await readBody(request));
+      const payload = await readJsonBody(request, MAX_UPLOAD_BODY_BYTES);
       const uploaded = await uploadImageToCloudinary(payload);
       await logAudit(request, "image.upload", {
         provider: uploaded.provider,
@@ -2051,69 +2652,76 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
-    if (request.url === "/api/cloudinary/delete" && request.method === "POST") {
+    if (pathname === "/api/cloudinary/delete" && request.method === "POST") {
       if (!checkRateLimit(request, "cloudinary-delete", 40, 60 * 1000)) {
         sendJson(response, 429, { error: "Too many delete requests" });
         return;
       }
-      const payload = JSON.parse(await readBody(request));
+      const payload = await readJsonBody(request, 4 * 1024);
       const deleted = await deleteCloudinaryImage(payload.publicId);
       await logAudit(request, "image.delete", { publicId: payload.publicId || "", result: deleted.result || "skipped" });
       sendJson(response, 200, deleted);
       return;
     }
 
-    if (request.url === "/api/password-reset" && request.method === "POST") {
+    if (pathname === "/api/password-reset" && request.method === "POST") {
       if (!checkRateLimit(request, "password-reset-admin", 5, 60 * 60 * 1000)) {
         sendJson(response, 429, { error: "Too many reset requests" });
         return;
       }
-      const payload = JSON.parse(await readBody(request));
+      const payload = await readJsonBody(request, 8 * 1024);
       const reset = await sendSupabasePasswordReset(payload.email, request);
       await logAudit(request, "password.reset.request", { email: String(payload.email || "").trim().toLowerCase() });
       sendJson(response, 200, reset);
       return;
     }
 
-    if (request.url === "/api/password-update" && request.method === "POST") {
+    if (pathname === "/api/password-update" && request.method === "POST") {
       if (!checkRateLimit(request, "password-update", 8, 15 * 60 * 1000)) {
         sendJson(response, 429, { error: "Too many password update requests" });
         return;
       }
-      const session = getSession(request);
+      const session = request.hccSession;
       if (!session || session.provider !== "supabase") {
         sendJson(response, 400, { error: "Password changes are available for Supabase admin accounts. Configure ADMIN_PASSWORD only if you intentionally enable local admin." });
         return;
       }
-      const payload = JSON.parse(await readBody(request));
-      const updated = await updateSupabasePasswordWithLogin(session.identity, payload.currentPassword, payload.newPassword);
+      const payload = await readJsonBody(request, 8 * 1024);
+      const updated = await updateSupabasePasswordWithSession(session, payload.currentPassword, payload.newPassword);
       await logAudit(request, "password.update", { identity: session.identity });
-      sendJson(response, 200, updated);
+      sendJson(response, 200, { ...updated, reauthenticate: true }, {
+        "Set-Cookie": [clearCookie(SESSION_COOKIE), clearCookie(MFA_PENDING_COOKIE)]
+      });
       return;
     }
 
-    if (request.url === "/api/password-update-token" && request.method === "POST") {
-      if (!checkRateLimit(request, "password-update-token", 8, 15 * 60 * 1000)) {
+    if (pathname === "/api/password-update-token" && request.method === "POST") {
+      if (!(await checkSharedRateLimit(request, "password-update-token", 8, 15 * 60 * 1000))) {
         sendJson(response, 429, { error: "Too many password update requests" });
         return;
       }
-      const payload = JSON.parse(await readBody(request));
-      sendJson(response, 200, await updateSupabasePasswordWithToken(payload.accessToken, payload.newPassword));
+      const payload = await readJsonBody(request, 24 * 1024);
+      sendJson(response, 200, await updateSupabasePasswordFromRecovery(payload.accessToken, payload.newPassword, payload.mfaCode));
       return;
     }
 
-    if (request.url === "/api/form-submit" && request.method === "POST") {
-      if (!checkRateLimit(request, "form-submit", 20, 60 * 1000)) {
+    if (pathname === "/api/form-submit" && request.method === "POST") {
+      if (!checkRateLimit(request, "form-submit-ip", 20, 60 * 1000)) {
         sendJson(response, 429, { error: "Too many form submissions" });
         return;
       }
-      const payload = JSON.parse(await readBody(request, 32 * 1024));
+      const payload = await readJsonBody(request, 32 * 1024);
+      const sharedAllowed = await checkSharedRateLimit(request, "form-submit-subject", 20, 60 * 1000, payload.email || payload.phone || "");
+      if (!sharedAllowed) {
+        sendJson(response, 429, { error: "Too many form submissions" });
+        return;
+      }
       const result = await forwardFormSubmission(payload);
       sendJson(response, result.deliveryStatus === "failed" ? 202 : 200, result);
       return;
     }
 
-    serveFile(request.url, response);
+    serveFile(pathname, response, { protectedAsset: requiresAdminAuth(pathname, request.method) });
   } catch (error) {
     const status = Number.isInteger(error.statusCode) ? error.statusCode : 500;
     if (status >= 500) console.error(error);
@@ -2122,8 +2730,14 @@ const server = http.createServer(async (request, response) => {
   }
 });
 
+server.requestTimeout = 15 * 1000;
+server.headersTimeout = 10 * 1000;
+server.keepAliveTimeout = 5 * 1000;
+server.maxRequestsPerSocket = 100;
+
 validateStartupConfig();
 ensureContentFile();
+startMaintenanceJobs();
 server.listen(PORT, () => {
   console.log(`HCC website running at http://localhost:${PORT}/`);
   console.log(`Admin panel available at http://localhost:${PORT}/admin`);

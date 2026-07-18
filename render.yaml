@@ -10,13 +10,17 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: NODE_VERSION
+        value: "24.18.0"
       - key: TRUST_PROXY
         value: "true"
       - key: ADMIN_SESSION_HOURS
-        value: "8"
+        value: "1"
       - key: ALLOW_LOCAL_ADMIN
         value: "false"
       - key: SUPABASE_AUTH_ENABLED
+        value: "true"
+      - key: SUPABASE_MFA_REQUIRED
         value: "true"
       - key: SUPABASE_CONTENT_TABLE
         value: hcc_site_content
@@ -29,7 +33,9 @@ services:
       - key: CLOUDINARY_FOLDER
         value: hcc-website
       - key: BOOKING_RETENTION_DAYS
-        value: "0"
+        value: "180"
+      - key: BOOKING_PURGE_INTERVAL_HOURS
+        value: "6"
       - key: SESSION_SECRET
         generateValue: true
       - key: PUBLIC_ORIGIN

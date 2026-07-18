@@ -4,6 +4,8 @@ This folder contains the shared website/mobile-app admin panel, Supabase-ready c
 
 ## Local Run
 
+Use Node.js 24.18.0 or newer within the Node 24 release line. The deployment and CI configuration enforce this minimum so the server receives the required Node security fixes.
+
 ```bash
 npm ci
 npm start
@@ -69,11 +71,14 @@ The app can use Supabase Auth for real admin accounts.
 2. Add allowed admin emails to `ADMIN_EMAILS`.
 3. Set:
    - `SUPABASE_AUTH_ENABLED=true`
+   - `SUPABASE_MFA_REQUIRED=true`
    - `SUPABASE_ANON_KEY`
    - `ADMIN_EMAILS=owner@example.com,manager@example.com`
 4. Restart/redeploy.
 
 When `SUPABASE_AUTH_ENABLED=true`, the local `ADMIN_USER` / `ADMIN_PASSWORD` login is disabled by default. Set `ALLOW_LOCAL_ADMIN=true` only for a short, deliberate emergency window, then disable it again.
+
+Production admin access should keep `SUPABASE_MFA_REQUIRED=true`. Each allowed Supabase admin must complete a verified TOTP factor so the server receives an AAL2 session before granting access.
 
 `ADMIN_EMAILS` means the Supabase Auth email addresses allowed into the admin panel. Example:
 
@@ -98,7 +103,8 @@ Included server hardening:
 - Login and API rate limiting
 - Content Security Policy and anti-framing headers
 - Same-origin checks for all write requests
-- Eight-hour admin session expiry by default
+- One-hour admin session expiry by default
+- Required Supabase AAL2/TOTP verification for production admins
 - Exact public-file allowlist that blocks server source, data files, and deployment documentation
 - Production local-admin fallback disabled when Supabase Auth is enabled
 - Form honeypot, field allowlist, and input-length limits
@@ -136,10 +142,11 @@ Admins can permanently delete an individual booking from its expanded card. This
 Optional automatic retention is controlled with:
 
 ```bash
-BOOKING_RETENTION_DAYS=0
+BOOKING_RETENTION_DAYS=180
+BOOKING_PURGE_INTERVAL_HOURS=6
 ```
 
-`0` disables automatic deletion. A positive whole number deletes bookings older than that many days when the booking list is read. Choose a period only after confirming HCC's operational, accounting, dispute, and legal requirements.
+The production default retains booking records for 180 days and runs a background deletion sweep every six hours. Production refuses to start with `BOOKING_RETENTION_DAYS=0`; disabling retention is available only for deliberate non-production testing. Set `BOOKING_PURGE_INTERVAL_HOURS` to a positive number.
 
 ### Customer Auto-response Email
 
@@ -160,15 +167,17 @@ Set these environment variables before hosting:
 ADMIN_USER=your-user
 ADMIN_PASSWORD=your-strong-password
 SESSION_SECRET=another-long-random-secret
-ADMIN_SESSION_HOURS=8
+ADMIN_SESSION_HOURS=1
 ALLOW_LOCAL_ADMIN=false
 PUBLIC_ORIGIN=https://your-domain.example
 SUPABASE_URL=https://your-project-ref.supabase.co
 SUPABASE_ANON_KEY=your-public-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-server-only-service-role-key
 SUPABASE_BOOKINGS_TABLE=hcc_bookings
-BOOKING_RETENTION_DAYS=0
+BOOKING_RETENTION_DAYS=180
+BOOKING_PURGE_INTERVAL_HOURS=6
 SUPABASE_AUTH_ENABLED=true
+SUPABASE_MFA_REQUIRED=true
 ADMIN_EMAILS=owner@example.com
 CLOUDINARY_CLOUD_NAME=your-cloud-name
 CLOUDINARY_API_KEY=your-api-key
@@ -192,7 +201,7 @@ Admins listed in `ADMIN_EMAILS` can request a reset email. Logged-in Supabase ad
 
 The local `ADMIN_USER` / `ADMIN_PASSWORD` account is intended for local development. It is disabled whenever Supabase Auth is enabled unless `ALLOW_LOCAL_ADMIN=true` is explicitly set.
 
-Admin cookies are signed, `HttpOnly`, `SameSite=Lax`, `Secure` in production, and expire after `ADMIN_SESSION_HOURS` (eight hours by default). Changing `SESSION_SECRET` immediately invalidates every existing admin session.
+Admin cookies are signed, `HttpOnly`, `SameSite=Strict`, `Secure` in production, and expire after `ADMIN_SESSION_HOURS` (one hour by default). Supabase sessions are revalidated on protected requests, and changing `SESSION_SECRET` immediately invalidates every existing admin session.
 
 ### Backups
 
@@ -228,7 +237,7 @@ If the audit table is missing, the app falls back to `data/audit.json` and conte
    - `ADMIN_USER`
    - `ADMIN_PASSWORD`
    - `SESSION_SECRET`
-   - `ADMIN_SESSION_HOURS=8`
+   - `ADMIN_SESSION_HOURS=1`
    - `ALLOW_LOCAL_ADMIN=false`
    - `PUBLIC_ORIGIN=https://your-domain.example`
    - `SUPABASE_URL`
@@ -236,8 +245,10 @@ If the audit table is missing, the app falls back to `data/audit.json` and conte
    - `SUPABASE_SERVICE_ROLE_KEY`
    - `SUPABASE_AUDIT_TABLE`
    - `SUPABASE_BOOKINGS_TABLE=hcc_bookings`
-   - `BOOKING_RETENTION_DAYS=0`
+   - `BOOKING_RETENTION_DAYS=180`
+   - `BOOKING_PURGE_INTERVAL_HOURS=6`
    - `SUPABASE_AUTH_ENABLED`
+   - `SUPABASE_MFA_REQUIRED=true`
    - `ADMIN_EMAILS`
    - `CLOUDINARY_CLOUD_NAME`
    - `CLOUDINARY_API_KEY`
@@ -251,7 +262,7 @@ If the audit table is missing, the app falls back to `data/audit.json` and conte
 2. Create a Railway project from the repo.
 3. Railway should detect the Node app from `package.json`.
 4. Start command: `npm start`.
-5. Add `ADMIN_USER`, `ADMIN_PASSWORD`, `SESSION_SECRET`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_AUTH_ENABLED`, `ADMIN_EMAILS`, `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, and `FORMSPREE_ENDPOINT` variables.
+5. Add `ADMIN_USER`, `ADMIN_PASSWORD`, `SESSION_SECRET`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_AUTH_ENABLED`, `SUPABASE_MFA_REQUIRED`, `ADMIN_EMAILS`, `BOOKING_RETENTION_DAYS`, `BOOKING_PURGE_INTERVAL_HOURS`, `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, and `FORMSPREE_ENDPOINT` variables.
 
 ## Production Notes
 
@@ -261,7 +272,7 @@ If the audit table is missing, the app falls back to `data/audit.json` and conte
 - Published/order/featured controls are supported for Phase 5 content polish.
 - `data/content.json` remains only as a local fallback.
 - Uploaded images are stored as Cloudinary URLs when Cloudinary env vars are configured. Base64 local fallback is development only.
-- The admin session is cookie based. Use `SUPABASE_AUTH_ENABLED=true` and `ADMIN_EMAILS` for real admin accounts.
+- The admin session is cookie based. Use `SUPABASE_AUTH_ENABLED=true`, `SUPABASE_MFA_REQUIRED=true`, and `ADMIN_EMAILS` for real admin accounts.
 - Keep database backups or periodic JSON exports.
 
 ## Security Verification And Key Rotation
@@ -272,6 +283,8 @@ Run the automated route, header, origin, login, honeypot, and session checks bef
 npm run check
 npm run test:security
 ```
+
+CI also rejects tracked `.env` variants, private-key files, and high-confidence credential patterns. Keep real credentials in the hosting provider's encrypted environment settings; only `.env.example` belongs in source control.
 
 If a Supabase service-role key is ever exposed, rotate it in the Supabase dashboard, replace `SUPABASE_SERVICE_ROLE_KEY` in Render, and redeploy. Also generate a new `SESSION_SECRET` during client handover so previously issued admin sessions stop working.
 

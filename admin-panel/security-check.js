@@ -50,6 +50,109 @@ async function request(origin, pathname, options = {}) {
   return fetch(`${origin}${pathname}`, { redirect: "manual", ...options });
 }
 
+async function getCsrfToken(origin, cookie) {
+  const response = await request(origin, "/api/session", { headers: { Cookie: cookie } });
+  assert.equal(response.status, 200);
+  const session = await response.json();
+  assert.match(session.csrfToken, /^[A-Za-z0-9_-]{32,}$/);
+  return session.csrfToken;
+}
+
+function getCookie(setCookieHeader, name) {
+  const match = String(setCookieHeader || "").match(new RegExp(`(?:^|,\\s*)${name}=([^;,]*)`));
+  assert.ok(match, `${name} cookie is missing`);
+  return `${name}=${match[1]}`;
+}
+
+function readSignedCookiePayload(cookie) {
+  const encodedValue = cookie.slice(cookie.indexOf("=") + 1);
+  const value = decodeURIComponent(encodedValue);
+  const payload = value.slice(0, value.indexOf("."));
+  return JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+}
+
+function makeTestJwt(payload) {
+  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  return `${header}.${body}.test-signature`;
+}
+
+async function withFakeSupabase(callback) {
+  const user = {
+    id: "22222222-2222-4222-8222-222222222222",
+    email: "admin@example.com",
+    updated_at: "2026-07-15T10:00:00.000Z",
+    factors: []
+  };
+  const state = { revoked: false, challenges: 0, verifications: 0, userChecks: 0 };
+  const tokenFor = (aal, amr = [{ method: "password" }]) => makeTestJwt({
+    sub: user.id,
+    email: user.email,
+    aal,
+    amr,
+    session_id: "11111111-1111-4111-8111-111111111111",
+    exp: Math.floor(Date.now() / 1000) + 3600
+  });
+  const aal1Token = tokenFor("aal1");
+  const aal2Token = tokenFor("aal2", [{ method: "password" }, { method: "totp" }]);
+  const server = http.createServer(async (request, response) => {
+    const parsed = new URL(request.url, `http://${HOST}`);
+    let body = "";
+    for await (const chunk of request) body += chunk;
+    const json = body ? JSON.parse(body) : {};
+    const bearer = String(request.headers.authorization || "").replace(/^Bearer\s+/i, "");
+    const send = (status, payload) => {
+      response.writeHead(status, { "Content-Type": "application/json" });
+      response.end(JSON.stringify(payload));
+    };
+
+    if (parsed.pathname === "/auth/v1/token" && parsed.searchParams.get("grant_type") === "password") {
+      if (json.email !== user.email || json.password !== "correct-password") return send(400, { error: "invalid_grant" });
+      return send(200, { access_token: aal1Token, refresh_token: "refresh-token", user });
+    }
+    if (parsed.pathname === "/auth/v1/user" && request.method === "GET") {
+      state.userChecks += 1;
+      if (state.revoked && bearer === aal2Token) return send(401, { error: "session_revoked" });
+      if (![aal1Token, aal2Token].includes(bearer)) return send(401, { error: "invalid_token" });
+      return send(200, user);
+    }
+    if (parsed.pathname === "/auth/v1/factors" && request.method === "POST" && bearer === aal1Token) {
+      user.factors = [{ id: "factor-totp-1", factor_type: "totp", status: "unverified" }];
+      return send(200, {
+        id: "factor-totp-1",
+        factor_type: "totp",
+        totp: {
+          qr_code: "<svg xmlns='http://www.w3.org/2000/svg'></svg>",
+          secret: "TESTSECURITYSECRET",
+          uri: "otpauth://totp/HCC:admin@example.com?secret=TESTSECURITYSECRET"
+        }
+      });
+    }
+    if (parsed.pathname === "/auth/v1/factors/factor-totp-1/challenge" && request.method === "POST" && bearer === aal1Token) {
+      state.challenges += 1;
+      return send(200, { id: "challenge-1", type: "totp", expires_at: Math.floor(Date.now() / 1000) + 60 });
+    }
+    if (parsed.pathname === "/auth/v1/factors/factor-totp-1/verify" && request.method === "POST" && bearer === aal1Token) {
+      state.verifications += 1;
+      if (json.challenge_id !== "challenge-1" || json.code !== "123456") return send(400, { error: "bad_code" });
+      user.factors = [{ id: "factor-totp-1", factor_type: "totp", status: "verified" }];
+      return send(200, { access_token: aal2Token, refresh_token: "refresh-token-2", user });
+    }
+    if (parsed.pathname === "/auth/v1/logout" && request.method === "POST" && bearer === aal2Token) {
+      state.revoked = true;
+      return send(204, {});
+    }
+    return send(404, { error: "not_found", path: parsed.pathname });
+  });
+  await new Promise((resolve) => server.listen(0, HOST, resolve));
+  const address = server.address();
+  try {
+    await callback(`http://${HOST}:${address.port}`, state, { aal1Token, aal2Token });
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+}
+
 async function withFakeFormspree(callback) {
   const submissions = [];
   const server = http.createServer(async (request, response) => {
@@ -91,17 +194,21 @@ async function checkHardenedProduction() {
     const healthBody = await health.json();
     assert.equal(healthBody.ok, false);
     assert.equal(healthBody.ready, false);
-    assert.ok(healthBody.readinessIssues.includes("supabase-storage"));
-    assert.ok(healthBody.readinessIssues.includes("cloudinary"));
-    assert.ok(healthBody.readinessIssues.includes("formspree"));
+    assert.deepEqual(Object.keys(healthBody).sort(), ["ok", "ready"]);
 
     const home = await request(origin, "/");
     assert.equal(home.status, 200);
-    assert.match(home.headers.get("content-security-policy") || "", /frame-ancestors 'none'/);
+    const csp = home.headers.get("content-security-policy") || "";
+    assert.match(csp, /frame-ancestors 'none'/);
+    assert.match(csp, /script-src 'self'/);
+    assert.match(csp, /script-src-attr 'none'/);
+    assert.doesNotMatch(csp, /script-src[^;]*'unsafe-inline'/);
     assert.equal(home.headers.get("x-frame-options"), "DENY");
     assert.equal((await request(origin, "/logo.webp")).status, 200);
     assert.equal((await request(origin, "/gallery-local-1.webp")).status, 200);
     assert.equal((await request(origin, "/gallery-local-2.webp")).status, 200);
+    assert.equal((await request(origin, "/site.js")).status, 200);
+    assert.equal((await request(origin, "/booking-status.js")).status, 200);
     assert.equal((await request(origin, "/api/content")).status, 200);
     const bookingStatusPage = await request(origin, "/booking-status");
     assert.equal(bookingStatusPage.status, 200);
@@ -111,13 +218,16 @@ async function checkHardenedProduction() {
     assert.equal(bookingConfirmationPage.headers.get("cache-control"), "no-store");
     const bookingConfirmationHtml = await bookingConfirmationPage.text();
     assert.match(bookingConfirmationHtml, /id="confirmation-reference"/);
-    assert.match(bookingConfirmationHtml, /\^HCC-\\d\{8\}/);
+    assert.match(bookingConfirmationHtml, /src="\/booking-confirmation\.js"/);
 
     for (const pathname of ["/server.js", "/package.json", "/README.md", "/supabase-schema.sql", "/data/content.json", "/.env"]) {
       assert.equal((await request(origin, pathname)).status, 404, `${pathname} must not be public`);
     }
 
     assert.equal((await request(origin, "/admin")).status, 302);
+    assert.equal((await request(origin, "/%61dmin")).status, 302);
+    assert.equal((await request(origin, "/%61dmin.js")).status, 302);
+    assert.equal((await request(origin, "/%69ndex.html")).status, 302);
     assert.equal((await request(origin, "/api/audit")).status, 401);
     assert.equal((await request(origin, "/api/bookings")).status, 401);
 
@@ -142,6 +252,20 @@ async function checkHardenedProduction() {
     });
     assert.equal(fallbackLogin.status, 200);
     assert.equal(fallbackLogin.headers.get("set-cookie"), null);
+
+    const missingOriginLogin = await request(origin, "/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: "username=admin&password=change-this-password"
+    });
+    assert.equal(missingOriginLogin.status, 403);
+
+    const oversizedLogin = await request(origin, "/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: origin },
+      body: `username=admin&password=${"x".repeat(9000)}`
+    });
+    assert.equal(oversizedLogin.status, 413);
 
     const honeypot = await request(origin, "/api/form-submit", {
       method: "POST",
@@ -188,6 +312,13 @@ async function checkHardenedProduction() {
     });
     assert.equal(missingEmail.status, 400);
 
+    const wrongContentType = await request(origin, "/api/form-submit", {
+      method: "POST",
+      headers: { "Content-Type": "text/plain", Origin: origin },
+      body: "not-json"
+    });
+    assert.equal(wrongContentType.status, 415);
+
     const sitemap = await request(origin, "/sitemap.xml", {
       headers: { Host: "attacker.example" }
     });
@@ -207,7 +338,7 @@ async function checkExpiringLocalSession() {
   await withServer({
     PORT: port,
     NODE_ENV: "production",
-    TRUST_PROXY: "false",
+    TRUST_PROXY: "true",
     PUBLIC_ORIGIN: `http://${HOST}:${port}`,
     SUPABASE_AUTH_ENABLED: "false",
     ADMIN_SESSION_HOURS: "1",
@@ -226,9 +357,9 @@ async function checkExpiringLocalSession() {
     assert.equal(login.status, 302);
     const cookie = login.headers.get("set-cookie") || "";
     assert.match(cookie, /HttpOnly/);
-    assert.match(cookie, /SameSite=Lax/);
+    assert.match(cookie, /SameSite=Strict/);
     assert.match(cookie, /Secure/);
-    assert.match(cookie, /Max-Age=3600/);
+    assert.match(cookie, /Max-Age=(?:3599|3600)/);
 
     const cookieValue = decodeURIComponent(cookie.split(";", 1)[0].split("=", 2)[1]);
     const payload = cookieValue.slice(0, cookieValue.indexOf("."));
@@ -240,20 +371,36 @@ async function checkExpiringLocalSession() {
     const bookings = await request(origin, "/api/bookings", { headers: { Cookie: cookie.split(";", 1)[0] } });
     assert.equal(bookings.status, 200);
     assert.deepEqual((await bookings.json()).bookings, []);
+    const cookieHeader = cookie.split(";", 1)[0];
+    const csrfToken = await getCsrfToken(origin, cookieHeader);
+
+    const missingCsrf = await request(origin, "/api/content", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookieHeader, Origin: origin },
+      body: JSON.stringify({ tournaments: [], images: [], socials: [], testimonials: [] })
+    });
+    assert.equal(missingCsrf.status, 403);
 
     const hostileName = "O'Connor </button><script>globalThis.hccXss=true</script>";
     const contentWrite = await request(origin, "/api/content", {
       method: "POST",
-      headers: { "Content-Type": "application/json", Cookie: cookie.split(";", 1)[0], Origin: origin },
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: cookieHeader,
+        Origin: origin,
+        "X-HCC-CSRF": csrfToken,
+        "X-Forwarded-For": "198.51.100.10, 203.0.113.25"
+      },
       body: JSON.stringify({
         tournaments: [{
           id: "bad'id",
           name: hostileName,
+          posterPublicId: "hcc-website/tournaments/internal-provider-id",
           registerLink: "javascript:alert(1)",
           cricLink: "https://user:password@example.com/private",
           poster: "data:image/svg+xml,<svg onload=alert(1)></svg>"
         }],
-        images: [],
+        images: [{ id: "hidden-image", title: "Private draft", src: "https://example.com/private.jpg", published: false, publicId: "provider-secret" }],
         socials: [{ id: "social-1", label: "Unsafe", url: "javascript:alert(1)" }],
         testimonials: []
       })
@@ -265,15 +412,43 @@ async function checkExpiringLocalSession() {
     assert.equal(sanitizedContent.tournaments[0].registerLink, "");
     assert.equal(sanitizedContent.tournaments[0].cricLink, "");
     assert.equal(sanitizedContent.tournaments[0].poster, "");
+    assert.equal(sanitizedContent.tournaments[0].posterPublicId, "hcc-website/tournaments/internal-provider-id");
     assert.equal(sanitizedContent.socials[0].url, "");
 
+    const publicContentResponse = await request(origin, "/api/content");
+    assert.equal(publicContentResponse.status, 200);
+    const publicContent = await publicContentResponse.json();
+    assert.equal(Object.hasOwn(publicContent.tournaments[0], "posterPublicId"), false);
+    assert.equal(publicContent.images.length, 0);
+
+    const auditResponse = await request(origin, "/api/audit", { headers: { Cookie: cookieHeader } });
+    const auditEntries = (await auditResponse.json()).entries;
+    assert.equal(auditEntries.find((entry) => entry.action === "content.save").ip, "203.0.113.25");
+
+    const outsideCloudinaryFolder = await request(origin, "/api/cloudinary/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookieHeader, Origin: origin, "X-HCC-CSRF": csrfToken },
+      body: JSON.stringify({ publicId: "another-project/private-image" })
+    });
+    assert.equal(outsideCloudinaryFolder.status, 400);
+
     const siteSource = fs.readFileSync(path.join(ROOT, "site.html"), "utf8");
-    assert.match(siteSource, /data-tournament-action="register"/);
+    const siteScript = fs.readFileSync(path.join(ROOT, "site.js"), "utf8");
+    assert.match(siteScript, /data-tournament-action="register"/);
     assert.equal((siteSource.match(/maxlength="24" data-phone-input/g) || []).length, 2);
-    assert.match(siteSource, /Phone number must contain 7 to 15 digits/);
-    assert.match(siteSource, /sessionStorage\.setItem\('hcc-booking-confirmation'/);
-    assert.match(siteSource, /window\.location\.assign\(confirmationPath\)/);
-    assert.doesNotMatch(siteSource, /onclick="openTournament(?:Modal|Registration)\([^)]*escAttr/);
+    assert.match(siteScript, /Phone number must contain 7 to 15 digits/);
+    assert.match(siteScript, /sessionStorage\.setItem\('hcc-booking-confirmation'/);
+    assert.match(siteScript, /window\.location\.assign\(confirmationPath\)/);
+    assert.doesNotMatch(siteSource, /\son[a-z]+\s*=/i);
+    assert.doesNotMatch(siteSource, /<script(?![^>]*type="application\/ld\+json")(?![^>]*src=)/i);
+
+    assert.equal((await request(origin, "/logout")).status, 405);
+    const logout = await request(origin, "/logout", {
+      method: "POST",
+      headers: { Cookie: cookieHeader, Origin: origin, "X-HCC-CSRF": csrfToken }
+    });
+    assert.equal(logout.status, 302);
+    assert.match(logout.headers.get("set-cookie") || "", /Max-Age=0/);
   });
 }
 
@@ -293,7 +468,7 @@ async function checkBookingLifecycle() {
       ADMIN_PASSWORD: "strong-booking-password",
       SESSION_SECRET: "booking-lifecycle-session-secret",
       FORMSPREE_ENDPOINT: formspreeEndpoint,
-      BOOKING_RETENTION_DAYS: "0"
+      BOOKING_RETENTION_DAYS: "180"
     }, async (origin) => {
       const submitted = await request(origin, "/api/form-submit", {
         method: "POST",
@@ -346,6 +521,7 @@ async function checkBookingLifecycle() {
       assert.equal(login.status, 302);
       const cookie = (login.headers.get("set-cookie") || "").split(";", 1)[0];
       assert.ok(cookie);
+      const csrfToken = await getCsrfToken(origin, cookie);
 
       const bookingList = await request(origin, "/api/bookings", { headers: { Cookie: cookie } });
       assert.equal(bookingList.status, 200);
@@ -355,7 +531,7 @@ async function checkBookingLifecycle() {
 
       const updated = await request(origin, `/api/bookings/${reference}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json", Cookie: cookie, Origin: origin },
+        headers: { "Content-Type": "application/json", Cookie: cookie, Origin: origin, "X-HCC-CSRF": csrfToken },
         body: JSON.stringify({ status: "confirmed", admin_note: "Private staff note" })
       });
       assert.equal(updated.status, 200);
@@ -372,7 +548,7 @@ async function checkBookingLifecycle() {
 
       const deleted = await request(origin, `/api/bookings/${reference}`, {
         method: "DELETE",
-        headers: { Cookie: cookie, Origin: origin }
+        headers: { Cookie: cookie, Origin: origin, "X-HCC-CSRF": csrfToken }
       });
       assert.equal(deleted.status, 200);
 
@@ -408,9 +584,109 @@ async function checkBookingLifecycle() {
       assert.equal(delayedBooking.delivery_status, "failed");
       const deletedDelayed = await request(origin, `/api/bookings/${delayedBody.reference}`, {
         method: "DELETE",
-        headers: { Cookie: cookie, Origin: origin }
+        headers: { Cookie: cookie, Origin: origin, "X-HCC-CSRF": csrfToken }
       });
       assert.equal(deletedDelayed.status, 200);
+    });
+  });
+}
+
+async function checkSupabaseMfaAndRevocation() {
+  const port = String(22000 + (process.pid % 1000));
+  await withFakeSupabase(async (supabaseOrigin, state, tokens) => {
+    await withServer({
+      PORT: port,
+      NODE_ENV: "production",
+      TRUST_PROXY: "false",
+      PUBLIC_ORIGIN: `http://${HOST}:${port}`,
+      SUPABASE_AUTH_ENABLED: "true",
+      SUPABASE_MFA_REQUIRED: "true",
+      SUPABASE_URL: supabaseOrigin,
+      SUPABASE_ANON_KEY: "test-anon-key",
+      SUPABASE_SERVICE_ROLE_KEY: "",
+      ADMIN_EMAILS: "admin@example.com",
+      ALLOW_LOCAL_ADMIN: "false",
+      SESSION_SECRET: "mfa-security-check-session-secret",
+      BOOKING_RETENTION_DAYS: "180"
+    }, async (origin) => {
+      const login = await request(origin, "/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: origin },
+        body: "username=admin%40example.com&password=correct-password"
+      });
+      assert.equal(login.status, 302);
+      assert.equal(login.headers.get("location"), "/mfa");
+      const pendingCookie = getCookie(login.headers.get("set-cookie"), "hcc_mfa_pending");
+      const pendingPayload = readSignedCookiePayload(pendingCookie);
+      assert.equal(pendingPayload.identity, "admin@example.com");
+      assert.notEqual(pendingPayload.accessToken, tokens.aal1Token);
+      assert.equal(JSON.stringify(pendingPayload).includes(tokens.aal1Token), false);
+
+      const setup = await request(origin, "/mfa", { headers: { Cookie: pendingCookie } });
+      assert.equal(setup.status, 200);
+      assert.match(await setup.text(), /Secure your account/);
+
+      const enrollWithoutOrigin = await request(origin, "/mfa/enroll", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: pendingCookie },
+        body: `csrf=${encodeURIComponent(pendingPayload.csrfToken)}`
+      });
+      assert.equal(enrollWithoutOrigin.status, 403);
+
+      const enroll = await request(origin, "/mfa/enroll", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: pendingCookie, Origin: origin },
+        body: `csrf=${encodeURIComponent(pendingPayload.csrfToken)}`
+      });
+      assert.equal(enroll.status, 200);
+      const enrolledCookie = getCookie(enroll.headers.get("set-cookie"), "hcc_mfa_pending");
+      const enrolledPayload = readSignedCookiePayload(enrolledCookie);
+      const enrollmentHtml = await enroll.text();
+      assert.match(enrollmentHtml, /Authenticator setup QR code/);
+      assert.match(enrollmentHtml, /data:image\/svg\+xml;base64,/);
+      assert.match(enrollmentHtml, /TESTSECURITYSECRET/);
+      assert.equal(JSON.stringify(enrolledPayload).includes("TESTSECURITYSECRET"), false);
+
+      const verify = await request(origin, "/mfa/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: enrolledCookie, Origin: origin },
+        body: `csrf=${encodeURIComponent(enrolledPayload.csrfToken)}&code=123456`
+      });
+      const verifyFailure = verify.status === 302 ? "" : await verify.clone().text();
+      assert.equal(verify.status, 302, verifyFailure);
+      assert.equal(verify.headers.get("location"), "/admin");
+      const adminCookie = getCookie(verify.headers.get("set-cookie"), "hcc_admin_session");
+      const adminPayload = readSignedCookiePayload(adminCookie);
+      assert.equal(adminPayload.aal, "aal2");
+      assert.notEqual(adminPayload.accessToken, tokens.aal2Token);
+      assert.equal(JSON.stringify(adminPayload).includes(tokens.aal2Token), false);
+      assert.equal(state.challenges, 1);
+      assert.equal(state.verifications, 1);
+
+      const admin = await request(origin, "/admin", { headers: { Cookie: adminCookie } });
+      assert.equal(admin.status, 200);
+      assert.equal(admin.headers.get("cache-control"), "private, no-store");
+      const encodedAdminScript = await request(origin, "/%61dmin.js", { headers: { Cookie: adminCookie } });
+      assert.equal(encodedAdminScript.status, 200);
+      assert.equal(encodedAdminScript.headers.get("cache-control"), "private, no-store");
+      const csrfToken = await getCsrfToken(origin, adminCookie);
+      const badCsrf = await request(origin, "/api/content", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: adminCookie, Origin: origin, "X-HCC-CSRF": "wrong-token" },
+        body: JSON.stringify({ tournaments: [], images: [], socials: [], testimonials: [] })
+      });
+      assert.equal(badCsrf.status, 403);
+
+      const logout = await request(origin, "/logout", {
+        method: "POST",
+        headers: { Cookie: adminCookie, Origin: origin, "X-HCC-CSRF": csrfToken }
+      });
+      assert.equal(logout.status, 302);
+      assert.equal(state.revoked, true);
+      const stolenCookie = await request(origin, "/admin", { headers: { Cookie: adminCookie } });
+      assert.equal(stolenCookie.status, 302);
+      assert.equal(stolenCookie.headers.get("location"), "/login");
+      assert.ok(state.userChecks >= 3);
     });
   });
 }
@@ -420,6 +696,7 @@ async function main() {
     await checkHardenedProduction();
     await checkExpiringLocalSession();
     await checkBookingLifecycle();
+    await checkSupabaseMfaAndRevocation();
     console.log("Security checks passed.");
   } finally {
     fs.rmSync(TEST_DATA_DIR, { recursive: true, force: true });
