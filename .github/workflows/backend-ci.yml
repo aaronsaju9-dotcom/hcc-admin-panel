@@ -15,12 +15,46 @@ jobs:
       run:
         working-directory: admin-panel
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          node-version: 24
+          node-version: 24.18.0
           cache: npm
           cache-dependency-path: admin-panel/package-lock.json
+      - name: Scan tracked files for committed secrets
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          forbidden_files="$(
+            git ls-files | awk '
+              /(^|\/)\.env$/ ||
+              (/(^|\/)\.env\./ && $0 !~ /(^|\/)\.env\.example$/) ||
+              /\.(key|pem|p12|pfx)$/ { print }
+            '
+          )"
+          if [[ -n "$forbidden_files" ]]; then
+            echo "Tracked secret-bearing file types are not allowed:"
+            printf '%s\n' "$forbidden_files"
+            exit 1
+          fi
+
+          secret_pattern='-----BEGIN ([A-Z0-9]+ )?PRIVATE KEY-----|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|gh[pousr]_[A-Za-z0-9]{36,255}|github_pat_[A-Za-z0-9_]{70,255}|xox[baprs]-[A-Za-z0-9-]{10,}|[sr]k_live_[0-9A-Za-z]{20,}'
+          set +e
+          matches="$(git grep -IlE -e "$secret_pattern" -- .)"
+          grep_status=$?
+          set -e
+          if (( grep_status > 1 )); then
+            echo "Secret scan failed to run."
+            exit "$grep_status"
+          fi
+          if [[ -n "$matches" ]]; then
+            echo "Potential high-confidence secret patterns found in tracked files:"
+            printf '%s\n' "$matches"
+            echo "Remove and rotate any real credential before pushing."
+            exit 1
+          fi
       - run: npm ci
       - run: npm run check
       - run: npm run test:security
