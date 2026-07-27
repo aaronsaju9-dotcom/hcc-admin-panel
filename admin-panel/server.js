@@ -5,12 +5,16 @@ const crypto = require("crypto");
 const net = require("net");
 
 const PORT = Number(process.env.PORT || 8765);
+const IS_VERCEL = process.env.VERCEL === "1" || process.env.VERCEL === "true";
+const IS_VERCEL_PREVIEW = process.env.VERCEL_ENV === "preview";
 const ROOT = path.resolve(__dirname);
-const DATA_DIR = process.env.HCC_DATA_DIR ? path.resolve(process.env.HCC_DATA_DIR) : path.join(ROOT, "data");
+const DATA_DIR = process.env.HCC_DATA_DIR
+  ? path.resolve(process.env.HCC_DATA_DIR)
+  : (IS_VERCEL ? path.join("/tmp", "hcc-data") : path.join(ROOT, "data"));
 const CONTENT_FILE = path.join(DATA_DIR, "content.json");
 const AUDIT_FILE = path.join(DATA_DIR, "audit.json");
 const BOOKINGS_FILE = path.join(DATA_DIR, "bookings.json");
-const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const IS_PRODUCTION = process.env.NODE_ENV === "production" && !IS_VERCEL_PREVIEW;
 const ADMIN_USER = process.env.ADMIN_USER || "admin";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
 const SESSION_SECRET = process.env.SESSION_SECRET || (IS_PRODUCTION ? "" : crypto.randomBytes(32).toString("hex"));
@@ -98,6 +102,13 @@ function validateStartupConfig() {
   if (issues.length) {
     throw new Error(issues.join(" "));
   }
+}
+
+let runtimeValidated = false;
+function initializeRuntime() {
+  if (runtimeValidated) return;
+  validateStartupConfig();
+  runtimeValidated = true;
 }
 
 function getProductionReadinessIssues() {
@@ -1931,6 +1942,17 @@ function canonicalizePathname(rawPathname) {
   }
 }
 
+function resolveRequestPath(parsed) {
+  if (parsed.searchParams.has("path")) {
+    const raw = String(parsed.searchParams.get("path") || "");
+    return canonicalizePathname(raw ? (raw.startsWith("/") ? raw : `/${raw}`) : "/");
+  }
+  if (parsed.pathname === "/api/index" || parsed.pathname === "/api/index.mjs" || parsed.pathname === "/api/index.js") {
+    return "/";
+  }
+  return canonicalizePathname(parsed.pathname);
+}
+
 function authMode() {
   if (hasSupabaseAuthConfig()) return "supabase-auth";
   if (localAdminEnabled()) return "local-admin";
@@ -2366,10 +2388,11 @@ function sendLegalPage(response, type) {
 </html>`);
 }
 
-const server = http.createServer(async (request, response) => {
+async function handleRequest(request, response) {
   try {
+    initializeRuntime();
     const parsed = new URL(request.url, `http://localhost:${PORT}`);
-    const pathname = canonicalizePathname(parsed.pathname);
+    const pathname = resolveRequestPath(parsed);
 
     if (!checkRateLimit(request, "global", 600, 60 * 1000)) {
       sendJson(response, 429, { error: "Too many requests" });
@@ -2728,21 +2751,28 @@ const server = http.createServer(async (request, response) => {
     const message = status >= 500 && IS_PRODUCTION ? "The service is temporarily unavailable." : (error.message || "Server error");
     sendJson(response, status, { error: message });
   }
-});
+}
+
+const server = http.createServer(handleRequest);
 
 server.requestTimeout = 15 * 1000;
 server.headersTimeout = 10 * 1000;
 server.keepAliveTimeout = 5 * 1000;
 server.maxRequestsPerSocket = 100;
 
-validateStartupConfig();
-ensureContentFile();
-startMaintenanceJobs();
-server.listen(PORT, () => {
-  console.log(`HCC website running at http://localhost:${PORT}/`);
-  console.log(`Admin panel available at http://localhost:${PORT}/admin`);
-  console.log(`Content storage: ${hasSupabaseConfig() ? "Supabase" : "local JSON fallback"}`);
-  console.log(`Image storage: ${hasCloudinaryConfig() ? "Cloudinary" : "local data fallback"}`);
-  console.log(`Forms: ${FORMSPREE_ENDPOINT ? "Formspree proxy" : "not configured"}`);
-  console.log(`Local admin fallback: ${localAdminEnabled() ? "enabled" : "disabled"}`);
-});
+if (require.main === module && !IS_VERCEL) {
+  initializeRuntime();
+  ensureContentFile();
+  startMaintenanceJobs();
+  server.listen(PORT, () => {
+    console.log(`HCC website running at http://localhost:${PORT}/`);
+    console.log(`Admin panel available at http://localhost:${PORT}/admin`);
+    console.log(`Content storage: ${hasSupabaseConfig() ? "Supabase" : "local JSON fallback"}`);
+    console.log(`Image storage: ${hasCloudinaryConfig() ? "Cloudinary" : "local data fallback"}`);
+    console.log(`Forms: ${FORMSPREE_ENDPOINT ? "Formspree proxy" : "not configured"}`);
+    console.log(`Local admin fallback: ${localAdminEnabled() ? "enabled" : "disabled"}`);
+  });
+}
+
+module.exports = handleRequest;
+module.exports.handleRequest = handleRequest;
