@@ -2,8 +2,52 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
     {
-      "source": "/:path*",
-      "destination": "/api/index?path=:path*"
+      "source": "/",
+      "destination": "/admin-panel/site.html"
+    },
+    {
+      "source": "/admin",
+      "destination": "/api/index?path=/admin"
+    },
+    {
+      "source": "/booking-status",
+      "destination": "/api/index?path=/booking-status"
+    },
+    {
+      "source": "/booking-confirmation",
+      "destination": "/api/index?path=/booking-confirmation"
+    },
+    {
+      "source": "/privacy",
+      "destination": "/api/index?path=/privacy"
+    },
+    {
+      "source": "/terms",
+      "destination": "/api/index?path=/terms"
+    },
+    {
+      "source": "/login",
+      "destination": "/api/index?path=/login"
+    },
+    {
+      "source": "/mfa/:path*",
+      "destination": "/api/index?path=/mfa/:path*"
+    },
+    {
+      "source": "/reset-request",
+      "destination": "/api/index?path=/reset-request"
+    },
+    {
+      "source": "/reset-password",
+      "destination": "/api/index?path=/reset-password"
+    },
+    {
+      "source": "/logout",
+      "destination": "/api/index?path=/logout"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "/api/index?path=/api/:path*"
     }
   ]
 }
