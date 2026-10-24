@@ -267,7 +267,9 @@ async function checkExpiringLocalSession() {
     assert.equal(sanitizedContent.tournaments[0].poster, "");
     assert.equal(sanitizedContent.socials[0].url, "");
 
-    const siteSource = fs.readFileSync(path.join(ROOT, "site.html"), "utf8");
+    const scriptResponse = await request(origin, "/site.js");
+    assert.equal(scriptResponse.status, 200);
+    const siteSource = fs.readFileSync(path.join(ROOT, "site.html"), "utf8") + "\n" + await scriptResponse.text();
     assert.match(siteSource, /data-tournament-action="register"/);
     assert.equal((siteSource.match(/maxlength="24" data-phone-input/g) || []).length, 2);
     assert.match(siteSource, /Phone number must contain 7 to 15 digits/);

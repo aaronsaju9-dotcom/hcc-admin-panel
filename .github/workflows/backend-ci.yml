@@ -24,4 +24,8 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm run test:security
+      - run: node scripts/build-public.cjs
+        working-directory: .
+      - run: node scripts/check-release.cjs
+        working-directory: .
       - run: npm audit --audit-level=high

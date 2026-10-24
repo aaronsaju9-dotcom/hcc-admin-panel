@@ -4,8 +4,9 @@ const path = require("path");
 const crypto = require("crypto");
 
 const PORT = Number(process.env.PORT || 8765);
+const IS_VERCEL = process.env.VERCEL === "1" || process.env.VERCEL === "true";
 const ROOT = path.resolve(__dirname);
-const DATA_DIR = process.env.HCC_DATA_DIR ? path.resolve(process.env.HCC_DATA_DIR) : path.join(ROOT, "data");
+const DATA_DIR = process.env.HCC_DATA_DIR ? path.resolve(process.env.HCC_DATA_DIR) : (IS_VERCEL ? path.join("/tmp", "hcc-data") : path.join(ROOT, "data"));
 const CONTENT_FILE = path.join(DATA_DIR, "content.json");
 const AUDIT_FILE = path.join(DATA_DIR, "audit.json");
 const BOOKINGS_FILE = path.join(DATA_DIR, "bookings.json");
@@ -103,6 +104,14 @@ const publicFiles = new Map([
   ["/admin.css", path.resolve(ROOT, "admin.css")],
   ["/admin.js", path.resolve(ROOT, "admin.js")]
 ]);
+
+// Public redesign assets; administration and runtime data remain protected.
+for (const name of ["base.css", "redesign.css", "site.js", "scroll-design.js"]) {
+  publicFiles.set("/" + name, path.join(ROOT, name));
+}
+for (const name of ["ball-scroll.mp4", "ball-poster.jpg", "batter.png"]) {
+  publicFiles.set("/assets/" + name, path.join(ROOT, "assets", name));
+}
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -325,7 +334,9 @@ function commonHeaders(extra = {}) {
 function ensureContentFile() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
   if (!fs.existsSync(CONTENT_FILE)) {
-    fs.writeFileSync(CONTENT_FILE, JSON.stringify(fallbackContent, null, 2));
+    const bundled = path.join(ROOT, "data", "content.json");
+    if (bundled !== CONTENT_FILE && fs.existsSync(bundled)) fs.copyFileSync(bundled, CONTENT_FILE);
+    else fs.writeFileSync(CONTENT_FILE, JSON.stringify(fallbackContent, null, 2));
   }
 }
 
@@ -1252,7 +1263,7 @@ function sendResetPasswordPage(response) {
 </html>`);
 }
 
-function serveFile(requestUrl, response) {
+function serveFile(requestUrl, response, request) {
   const parsed = new URL(requestUrl, `http://localhost:${PORT}`);
   let routePath = parsed.pathname;
   if (routePath === "/") routePath = "/site.html";
@@ -1267,6 +1278,36 @@ function serveFile(requestUrl, response) {
   if (!safePath.startsWith(`${ROOT}${path.sep}`)) {
     response.writeHead(400, commonHeaders({ "Content-Type": "text/plain; charset=utf-8" }));
     response.end("Invalid path");
+    return;
+  }
+
+  if (path.extname(safePath).toLowerCase() === '.mp4') {
+    fs.stat(safePath, (error, stat) => {
+      if (error || !stat.isFile()) {
+        response.writeHead(404, commonHeaders({ 'Content-Type': 'text/plain; charset=utf-8' }));
+        response.end('Not found'); return;
+      }
+      const headers = commonHeaders({ 'Content-Type': 'video/mp4', 'Accept-Ranges': 'bytes', 'Cache-Control': 'public, max-age=3600' });
+      let start = 0, end = stat.size - 1, status = 200;
+      const range = request?.headers.range;
+      if (range) {
+        const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+        if (match && (match[1] || match[2])) {
+          if (!match[1]) start = Math.max(0, stat.size - Number(match[2]));
+          else { start = Number(match[1]); if (match[2]) end = Math.min(Number(match[2]), end); }
+        } else start = stat.size;
+        if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start >= stat.size || end < start || (!match?.[1] && Number(match?.[2]) === 0)) {
+          response.writeHead(416, { ...headers, 'Content-Range': `bytes */${stat.size}` }); response.end(); return;
+        }
+        headers['Content-Range'] = `bytes ${start}-${end}/${stat.size}`; status = 206;
+      }
+      response.writeHead(status, { ...headers, 'Content-Length': end - start + 1 });
+      if (request?.method === 'HEAD') { response.end(); return; }
+      const stream = fs.createReadStream(safePath, { start, end });
+      stream.on('error', () => response.destroy());
+      response.on('close', () => stream.destroy());
+      stream.pipe(response);
+    });
     return;
   }
 
@@ -1815,8 +1856,9 @@ function sendLegalPage(response, type) {
 </html>`);
 }
 
-const server = http.createServer(async (request, response) => {
+async function handleRequest(request, response) {
   try {
+    initializeRuntime();
     const parsed = new URL(request.url, `http://localhost:${PORT}`);
 
     if (!checkRateLimit(request, "global", 600, 60 * 1000)) {
@@ -2113,22 +2155,34 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
-    serveFile(request.url, response);
+    serveFile(request.url, response, request);
   } catch (error) {
     const status = Number.isInteger(error.statusCode) ? error.statusCode : 500;
     if (status >= 500) console.error(error);
     const message = status >= 500 && IS_PRODUCTION ? "The service is temporarily unavailable." : (error.message || "Server error");
     sendJson(response, status, { error: message });
   }
-});
+}
 
-validateStartupConfig();
-ensureContentFile();
-server.listen(PORT, () => {
-  console.log(`HCC website running at http://localhost:${PORT}/`);
-  console.log(`Admin panel available at http://localhost:${PORT}/admin`);
-  console.log(`Content storage: ${hasSupabaseConfig() ? "Supabase" : "local JSON fallback"}`);
-  console.log(`Image storage: ${hasCloudinaryConfig() ? "Cloudinary" : "local data fallback"}`);
-  console.log(`Forms: ${FORMSPREE_ENDPOINT ? "Formspree proxy" : "not configured"}`);
-  console.log(`Local admin fallback: ${localAdminEnabled() ? "enabled" : "disabled"}`);
-});
+let runtimeInitialized = false;
+function initializeRuntime() {
+  if (runtimeInitialized) return;
+  validateStartupConfig();
+  ensureContentFile();
+  runtimeInitialized = true;
+}
+
+if (require.main === module && !IS_VERCEL) {
+  initializeRuntime();
+  const server = http.createServer(handleRequest);
+  server.listen(PORT, () => {
+    console.log(`HCC website running at http://localhost:${PORT}/`);
+    console.log(`Admin panel available at http://localhost:${PORT}/admin`);
+    console.log(`Content storage: ${hasSupabaseConfig() ? "Supabase" : "local JSON fallback"}`);
+    console.log(`Image storage: ${hasCloudinaryConfig() ? "Cloudinary" : "local data fallback"}`);
+    console.log(`Forms: ${FORMSPREE_ENDPOINT ? "Formspree proxy" : "not configured"}`);
+    console.log(`Local admin fallback: ${localAdminEnabled() ? "enabled" : "disabled"}`);
+  });
+}
+
+module.exports = handleRequest;
