@@ -1,0 +1,110 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "buildCommand": "npm run build",
+  "outputDirectory": "public",
+  "functions": {
+    "api/index.mjs": {
+      "includeFiles": "{server.js,index.html,admin.js,admin.css,data/content.json}",
+      "excludeFiles": "{assets/**,public/**,hero-cricket.mp4,security-check.js,*.sql}"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/admin",
+      "destination": "/api/index?path=/admin"
+    },
+    {
+      "source": "/admin.css",
+      "destination": "/api/index?path=/admin.css"
+    },
+    {
+      "source": "/admin.js",
+      "destination": "/api/index?path=/admin.js"
+    },
+    {
+      "source": "/booking-status",
+      "destination": "/api/index?path=/booking-status"
+    },
+    {
+      "source": "/booking-confirmation",
+      "destination": "/api/index?path=/booking-confirmation"
+    },
+    {
+      "source": "/privacy",
+      "destination": "/api/index?path=/privacy"
+    },
+    {
+      "source": "/terms",
+      "destination": "/api/index?path=/terms"
+    },
+    {
+      "source": "/login",
+      "destination": "/api/index?path=/login"
+    },
+    {
+      "source": "/reset-request",
+      "destination": "/api/index?path=/reset-request"
+    },
+    {
+      "source": "/reset-password",
+      "destination": "/api/index?path=/reset-password"
+    },
+    {
+      "source": "/logout",
+      "destination": "/api/index?path=/logout"
+    },
+    {
+      "source": "/health",
+      "destination": "/api/index?path=/health"
+    },
+    {
+      "source": "/robots.txt",
+      "destination": "/api/index?path=/robots.txt"
+    },
+    {
+      "source": "/sitemap.xml",
+      "destination": "/api/index?path=/sitemap.xml"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "/api/index?path=/api/:path*"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self'; frame-src https://www.google.com https://maps.google.com; upgrade-insecure-requests"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=()"
+        }
+      ]
+    },
+    {
+      "source": "/",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    }
+  ]
+}

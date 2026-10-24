@@ -1,0 +1,13 @@
+{
+  "name": "hcc-website-release",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "build": "node scripts/build-public.cjs",
+    "check": "node --check api/index.mjs && node --check scripts/build-public.cjs && npm --prefix admin-panel run check",
+    "test": "npm run check && npm --prefix admin-panel run test:security && npm run build && node scripts/check-release.cjs"
+  }
+}

@@ -16,3 +16,10 @@ hero-bg-cricket.png
 hero-cricket.mp4
 index.html
 logo.png
+
+# Generated Vercel website output and local credentials
+/public/
+/.vercel/
+/node_modules/
+.env
+.env.*
