@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: hcc-with-admin-panel
+    name: hcc-sharjah
     runtime: node
     rootDir: .
     buildCommand: npm ci

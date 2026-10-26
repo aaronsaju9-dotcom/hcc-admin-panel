@@ -16,7 +16,7 @@ Retain existing environment variables and deployment protection. Production PUBL
 
 ## Render
 
-Keep service hcc-with-admin-panel and https://hcc-with-admin-panel.onrender.com because the mobile projects use that address. Root Directory: blank (repository root). Build: npm ci. Start: npm start. Health: /health. render.yaml describes the same root layout.
+Keep the existing Render service hcc-sharjah (srv-d8ta6ou7r5hc73eoott0) and https://hcc-with-admin-panel.onrender.com because the mobile projects use that address. Its display name differs from its retained public address. Root Directory: blank (repository root). Build: npm ci. Start: npm start. Health: /health. render.yaml describes the same service and root layout.
 
 Update the existing service folder setting during rollout and verify its repository connection after the GitHub rename. Do not create a replacement service, reset variables, run schema changes or import local content. Render PUBLIC_ORIGIN and its existing configuration stay unchanged.
 
