@@ -5,14 +5,18 @@
   "outputDirectory": "public",
   "functions": {
     "api/index.mjs": {
-      "includeFiles": "admin-panel/**",
-      "excludeFiles": "admin-panel/{assets/**,public/**,hero-cricket.mp4,security-check.js,*.sql}"
+      "includeFiles": "{server.js,index.html,admin/**,data/content.json}",
+      "excludeFiles": "{archive/**,assets/**,public/**,scripts/**,docs/**,*.sql,.env*,review/**,hcc-*/**,HCC*/**}"
     }
   },
   "rewrites": [
     {
       "source": "/admin",
       "destination": "/api/index?path=/admin"
+    },
+    {
+      "source": "/admin/:path*",
+      "destination": "/api/index?path=/admin/:path*"
     },
     {
       "source": "/admin.css",

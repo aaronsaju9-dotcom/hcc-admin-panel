@@ -1,0 +1,132 @@
+{
+  "tournaments": [
+    {
+      "id": "tournament-mqpdl25m-2oyxyf",
+      "name": "fku",
+      "status": "past",
+      "date": "2026-05-07",
+      "prize": "4uor",
+      "registration": "open",
+      "description": "hrfjkwed",
+      "rules": [
+        "ebjrkfs"
+      ],
+      "registerLink": "",
+      "cricLink": "",
+      "poster": ""
+    },
+    {
+      "id": "tournament-mqpdcxsq-xifyvi",
+      "name": "hkjfvs",
+      "status": "ongoing",
+      "date": "2026-06-09",
+      "prize": "295084",
+      "registration": "open",
+      "description": "ebhrfjnsd mxz",
+      "rules": [
+        "fhrbjkdcnmx"
+      ],
+      "registerLink": "",
+      "cricLink": "",
+      "poster": ""
+    },
+    {
+      "id": "tourn-ramadan-cup",
+      "name": "Ramadan Cup 2026",
+      "status": "upcoming",
+      "date": "2026-03-01",
+      "prize": "AED 5,000",
+      "registration": "open",
+      "description": "A competitive community cricket tournament hosted at Hamriyah Cricket Centre.",
+      "rules": [
+        "8 overs per side",
+        "Leather ball only",
+        "Team registration required"
+      ],
+      "registerLink": "",
+      "cricLink": "",
+      "poster": ""
+    },
+    {
+      "id": "tourn-friday-league",
+      "name": "Friday Night League",
+      "status": "ongoing",
+      "date": "2026-06-26",
+      "prize": "Trophy and medals",
+      "registration": "closed",
+      "description": "Weekly floodlight fixtures for local teams and academy squads.",
+      "rules": [
+        "League format",
+        "Umpire decision final",
+        "Match balls provided"
+      ],
+      "registerLink": "",
+      "cricLink": "",
+      "poster": ""
+    }
+  ],
+  "images": [
+    {
+      "id": "image-mqpdm982-g2heae",
+      "title": "hrk3",
+      "placement": "gallery",
+      "alt": "",
+      "src": "/gallery-local-1.webp"
+    },
+    {
+      "id": "image-mqpdm2pd-09x3gi",
+      "title": "final",
+      "placement": "gallery",
+      "alt": "",
+      "src": "/gallery-local-2.webp"
+    },
+    {
+      "id": "img-hero",
+      "title": "HCC Cricket Ground",
+      "placement": "hero",
+      "alt": "Hamriyah Cricket Centre ground",
+      "src": "hero-bg-cricket.webp"
+    },
+    {
+      "id": "img-logo",
+      "title": "HCC Logo",
+      "placement": "sponsor",
+      "alt": "Hamriyah Cricket Centre logo",
+      "src": "logo.webp"
+    }
+  ],
+  "socials": [
+    {
+      "id": "soc-whatsapp",
+      "platform": "WhatsApp",
+      "label": "WhatsApp booking",
+      "url": "https://wa.me/",
+      "visible": true
+    },
+    {
+      "id": "soc-instagram",
+      "platform": "Instagram",
+      "label": "HCC Instagram",
+      "url": "https://instagram.com/",
+      "visible": true
+    }
+  ],
+  "testimonials": [
+    {
+      "id": "test-a",
+      "name": "Adeel Khan",
+      "role": "Captain, Sharjah XI",
+      "text": "The pitch quality and night-match setup make HCC one of our favorite grounds to play at.",
+      "rating": 5,
+      "avatar": ""
+    },
+    {
+      "id": "test-b",
+      "name": "Rohan Menon",
+      "role": "Academy parent",
+      "text": "The facilities are clean, organized, and easy to book. The coaching environment is excellent.",
+      "rating": 5,
+      "avatar": ""
+    }
+  ]
+}

@@ -1,25 +1,30 @@
 .DS_Store
-
-# Runtime booking and audit fallbacks
-admin-panel/data/audit.json
-admin-panel/data/bookings.json
-
-# Separate, duplicate, or experimental projects
-hcc-admin-sites/
-hcc-app-admin-backend/
-hcc-mobile-app-expo-go/
-hcc-mobile-app/
-
-# Unrelated local exports and duplicate root assets
-outputs/
-hero-bg-cricket.png
-hero-cricket.mp4
-index.html
-logo.png
-
-# Generated Vercel website output and local credentials
-/public/
-/.vercel/
-/node_modules/
+node_modules/
+.vercel/
+npm-debug.log*
 .env
 .env.*
+!.env.example
+/public/
+/review/
+data/audit.json
+data/bookings.json
+
+# Private historical working copies and large local design drafts
+/archive/local-backups/
+/archive/design-drafts/
+/archive/release-workspace/
+
+# Independent mobile projects and unrelated exports
+/hcc-mobile-app/
+/hcc-mobile-app-expo-go/
+/HCC App SDK Folders/
+/hcc-admin-sites/
+/hcc-app-admin-backend/
+/outputs/
+
+# Temporary folders during migration
+/hcc-production-release/
+/hcc-redesign-final/
+/hcc-redesign-light/
+/hcc-redesign-scroll/

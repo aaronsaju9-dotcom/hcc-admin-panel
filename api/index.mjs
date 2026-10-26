@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
-const handleRequest = require("../admin-panel/server.js");
+const handleRequest = require("../server.js");
 
 export default function handler(request, response) {
   const url = new URL(request.url, "http://localhost");

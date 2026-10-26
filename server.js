@@ -94,15 +94,15 @@ function getProductionReadinessIssues() {
 }
 
 const publicFiles = new Map([
-  ["/site.html", path.resolve(ROOT, "site.html")],
+  ["/site.html", path.resolve(ROOT, "index.html")],
   ["/logo.webp", path.resolve(ROOT, "logo.webp")],
   ["/hero-bg-cricket.webp", path.resolve(ROOT, "hero-bg-cricket.webp")],
-  ["/hero-cricket.mp4", path.resolve(ROOT, "hero-cricket.mp4")],
   ["/gallery-local-1.webp", path.resolve(ROOT, "gallery-local-1.webp")],
   ["/gallery-local-2.webp", path.resolve(ROOT, "gallery-local-2.webp")],
   ["/index.html", path.resolve(ROOT, "index.html")],
-  ["/admin.css", path.resolve(ROOT, "admin.css")],
-  ["/admin.js", path.resolve(ROOT, "admin.js")]
+  ["/admin/index.html", path.resolve(ROOT, "admin/index.html")],
+  ["/admin.css", path.resolve(ROOT, "admin/admin.css")],
+  ["/admin.js", path.resolve(ROOT, "admin/admin.js")]
 ]);
 
 // Public redesign assets; administration and runtime data remain protected.
@@ -1053,7 +1053,7 @@ function requiresAdminAuth(request) {
   if (pathname === "/api/password-reset") return true;
   if (pathname === "/api/password-update") return true;
   return pathname === "/admin" ||
-    pathname === "/index.html" ||
+    pathname.startsWith("/admin/") ||
     pathname === "/admin.css" ||
     pathname === "/admin.js";
 }
@@ -1266,8 +1266,8 @@ function sendResetPasswordPage(response) {
 function serveFile(requestUrl, response, request) {
   const parsed = new URL(requestUrl, `http://localhost:${PORT}`);
   let routePath = parsed.pathname;
-  if (routePath === "/") routePath = "/site.html";
-  if (routePath === "/admin") routePath = "/index.html";
+  if (routePath === "/") routePath = "/index.html";
+  if (routePath === "/admin" || routePath === "/admin/") routePath = "/admin/index.html";
   const pathname = decodeURIComponent(routePath);
   const safePath = publicFiles.get(pathname);
   if (!safePath) {
