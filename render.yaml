@@ -2,7 +2,7 @@ services:
   - type: web
     name: hcc-with-admin-panel
     runtime: node
-    rootDir: admin-panel
+    rootDir: .
     buildCommand: npm ci
     startCommand: npm start
     healthCheckPath: /health

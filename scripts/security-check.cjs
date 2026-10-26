@@ -5,7 +5,7 @@ const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 
-const ROOT = __dirname;
+const ROOT = path.resolve(__dirname, "..");
 const HOST = "127.0.0.1";
 const TEST_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "hcc-security-"));
 
@@ -269,7 +269,7 @@ async function checkExpiringLocalSession() {
 
     const scriptResponse = await request(origin, "/site.js");
     assert.equal(scriptResponse.status, 200);
-    const siteSource = fs.readFileSync(path.join(ROOT, "site.html"), "utf8") + "\n" + await scriptResponse.text();
+    const siteSource = fs.readFileSync(path.join(ROOT, "index.html"), "utf8") + "\n" + await scriptResponse.text();
     assert.match(siteSource, /data-tournament-action="register"/);
     assert.equal((siteSource.match(/maxlength="24" data-phone-input/g) || []).length, 2);
     assert.match(siteSource, /Phone number must contain 7 to 15 digits/);

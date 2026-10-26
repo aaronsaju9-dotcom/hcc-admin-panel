@@ -7,9 +7,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "check": "node --check server.js && node --check admin.js && node --check security-check.js && node --check site.js && node --check scroll-design.js",
-    "test:security": "node security-check.js",
-    "build": "node scripts/build-public.cjs"
+    "check": "node --check server.js && node --check admin.js && node --check security-check.js",
+    "test:security": "node security-check.js"
   },
   "engines": {
     "node": ">=24 <25"
